@@ -50,3 +50,7 @@ the original phased delivery plan.
 The project is not safe to deploy solely because the test suite passes. Real
 device validation is required for camera/liveness, GNSS behavior, encrypted
 local storage, object-storage uploads, signed evidence, and offline recovery.
+
+
+
+#   CURENTLY UNDER DEVELOPMENT
