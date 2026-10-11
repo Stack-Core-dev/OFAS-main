@@ -1,0 +1,117 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ofas
+      POSTGRES_USER: ofas
+      POSTGRES_PASSWORD: ofas
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ofas -d ofas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: localstack/localstack:3.8.1
+    environment:
+      SERVICES: s3
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      DEFAULT_REGION: us-east-1
+    volumes:
+      - minio_data:/var/lib/localstack
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      FLASK_ENV: development
+      DATABASE_URL: postgresql://ofas:ofas@postgres:5432/ofas
+      SECRET_KEY: ${SECRET_KEY:-dev-secret-change-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-jwt-secret-change-in-production}
+      S3_ENDPOINT_URL: http://minio:4566
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: ofas-photos
+      S3_REGION: us-east-1
+      SUPER_ADMIN_USERNAME: admin
+      SUPER_ADMIN_EMAIL: admin@ofas.example.com
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-changeme123!}
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        while ! pg_isready -h postgres -U ofas -d ofas; do sleep 2; done &&
+        echo 'Initializing database...' &&
+        python -m scripts.init_db &&
+        echo 'Starting server...' &&
+        python -m app.app
+      "
+
+  admin:
+    build:
+      context: ./react_admin
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:5000
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+  # Test service for running tests in CI
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      FLASK_ENV: testing
+      DATABASE_URL: postgresql://ofas:ofas@postgres:5432/ofas
+      SECRET_KEY: test-secret
+      JWT_SECRET_KEY: test-jwt-secret
+      S3_ENDPOINT_URL: http://minio:4566
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: ofas-photos
+      S3_REGION: us-east-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "
+        echo 'Initializing test database...' &&
+        python -m scripts.init_db &&
+        echo 'Running tests...' &&
+        pytest tests/ -v --tb=short
+      "
+    profiles:
+      - test
+
+volumes:
+  postgres_data:
+  minio_data:

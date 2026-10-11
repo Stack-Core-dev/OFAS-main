@@ -1,0 +1,71 @@
+name: ofas_admin
+description: "OFAS Admin Dashboard - Field Visit Verification System"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # State Management
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+  
+  # Navigation
+  go_router: ^14.2.0
+  
+  # Networking
+  dio: ^5.4.3+1
+  
+  # Serialization
+  json_annotation: ^4.9.0
+  
+  # Security/Crypto
+  encrypt: ^5.0.3
+  pointycastle: ^3.8.4
+  
+  # Storage
+  shared_preferences: ^2.2.3
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  
+  # UI Components
+  fl_chart: ^0.68.0
+  image_picker: ^1.1.2
+  cached_network_image: ^3.3.1
+  photo_view: ^0.15.0
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  
+  # Utilities
+  intl: ^0.19.0
+  url_launcher: ^6.2.5
+  permission_handler: ^11.3.1
+  connectivity_plus: ^6.0.3
+  package_info_plus: ^8.0.0
+  device_info_plus: ^11.1.1
+  
+  # Auth
+  local_auth: ^2.3.0
+  
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  
+  # Code Generation
+  build_runner: ^2.4.9
+  riverpod_generator: ^2.4.0
+  json_serializable: ^6.8.0
+  hive_generator: ^2.0.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icons/
