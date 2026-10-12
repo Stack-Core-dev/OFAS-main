@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -42,37 +43,32 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ofas.security.integrity.DeviceIntegrityManager
 import kotlinx.coroutines.delay
-
-data class DeviceCheckItem(
-    val title: String,
-    val description: String,
-    val icon: ImageVector,
-    val passed: Boolean
-)
+import kotlinx.coroutines.launch
 
 @Composable
 fun DeviceCheckScreen(onContinue: () -> Unit) {
-    var checks by remember {
-        mutableStateOf(
-            listOf(
-                DeviceCheckItem("Airplane Mode", "Must be OFF", Icons.Default.Settings, true),
-                DeviceCheckItem("Developer Options", "Must be OFF", Icons.Default.Settings, true),
-                DeviceCheckItem("Location Services", "Must be ON", Icons.Default.LocationOn, true),
-                DeviceCheckItem("GNSS Fix", "Satellite fix required", Icons.Default.LocationOn, false)
-            )
-        )
-    }
+    var checkItems by remember { mutableStateOf<List<DeviceIntegrityManager.DeviceCheckItem>>(emptyList()) }
     var isChecking by remember { mutableStateOf(true) }
     var progress by remember { mutableStateOf(0f) }
+    var integrityManager by remember { mutableStateOf<DeviceIntegrityManager?>(null) }
 
     LaunchedEffect(Unit) {
-        delay(1500)
-        checks = checks.map { it.copy(passed = true) }
-        isChecking = false
+        val context = LocalContext.current
+        integrityManager = DeviceIntegrityManager.getInstance(context)
+        startIntegrityCheck()
+    }
+
+    fun startIntegrityCheck() {
+        integrityManager?.performIntegrityCheckAsync { result ->
+            checkItems = integrityManager?.getCheckItems(result) ?: emptyList()
+            isChecking = false
+        }
     }
 
     Column(
@@ -89,7 +85,7 @@ fun DeviceCheckScreen(onContinue: () -> Unit) {
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Verifying device integrity...",
+            text = if (isChecking) "Verifying device integrity..." else "Device verification complete",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
         )
@@ -110,7 +106,7 @@ fun DeviceCheckScreen(onContinue: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            checks.forEach { check ->
+            checkItems.forEach { check ->
                 CheckItemCard(check = check)
             }
         }
@@ -122,7 +118,7 @@ fun DeviceCheckScreen(onContinue: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
-            enabled = !isChecking && checks.all { it.passed },
+            enabled = !isChecking && checkItems.all { it.passed },
             shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.primary
@@ -138,7 +134,7 @@ fun DeviceCheckScreen(onContinue: () -> Unit) {
         Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedButton(
-            onClick = { },
+            onClick = { startIntegrityCheck() },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp)
         ) {
@@ -148,7 +144,7 @@ fun DeviceCheckScreen(onContinue: () -> Unit) {
 }
 
 @Composable
-private fun CheckItemCard(check: DeviceCheckItem) {
+private fun CheckItemCard(check: DeviceIntegrityManager.DeviceCheckItem) {
     val backgroundColor by animateColorAsState(
         targetValue = if (check.passed) {
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
@@ -181,7 +177,7 @@ private fun CheckItemCard(check: DeviceCheckItem) {
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = check.icon,
+                    imageVector = Icons.Default.CheckCircle, // Using default icon since we don't have access to the resId
                     contentDescription = check.title,
                     tint = if (check.passed) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.error,
@@ -212,3 +208,6 @@ private fun CheckItemCard(check: DeviceCheckItem) {
         }
     }
 }
+
+// Need to import LocalContext
+import androidx.compose.ui.platform.LocalContext

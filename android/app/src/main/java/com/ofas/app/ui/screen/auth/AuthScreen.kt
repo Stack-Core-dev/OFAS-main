@@ -32,6 +32,9 @@ fun AuthScreen(
             is AuthViewModel.AuthState.RequiresFaceAuth -> {
                 currentScreen = AuthScreenType.FaceAuth
             }
+            is AuthViewModel.AuthState.RequiresFaceEnrollment -> {
+                currentScreen = AuthScreenType.FaceEnrollment
+            }
             is AuthViewModel.AuthState.Unauthenticated -> {
                 currentScreen = AuthScreenType.Login
             }
@@ -60,9 +63,20 @@ fun AuthScreen(
                 }
             )
         }
+        AuthScreenType.FaceEnrollment -> {
+            FaceEnrollmentScreen(
+                onEnrolled = {
+                    authViewModel.completeFaceEnrollment()
+                },
+                onCancel = {
+                    currentScreen = AuthScreenType.Login
+                    authViewModel.logout()
+                }
+            )
+        }
     }
 }
 
 enum class AuthScreenType {
-    Login, FaceAuth
+    Login, FaceAuth, FaceEnrollment
 }

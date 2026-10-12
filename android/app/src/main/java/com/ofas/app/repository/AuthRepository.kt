@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import com.ofas.data.sync.FaceTemplateData
 import com.ofas.data.sync.LoginResponse
 import com.ofas.data.sync.UserData
 import com.ofas.data.sync.AuthTokenStore
@@ -21,6 +23,7 @@ class AuthRepository @Inject constructor(
         private const val KEY_USER_DATA = "user_data"
         private const val KEY_TOKEN_EXPIRY = "token_expiry"
         private const val KEY_DEVICE_ENROLLED = "device_enrolled"
+        private const val KEY_FACE_TEMPLATES = "face_templates"
     }
 
     private val masterKey = MasterKey.Builder(context)
@@ -37,6 +40,7 @@ class AuthRepository @Inject constructor(
 
     private val gson = Gson()
     private val tokenStore = AuthTokenStore(context)
+    private val faceTemplatesType = object : TypeToken<List<FaceTemplateData>>() {}.type
 
     fun saveAuthData(response: LoginResponse) {
         encryptedPrefs.edit()
@@ -51,6 +55,25 @@ class AuthRepository @Inject constructor(
         encryptedPrefs.edit()
             .putString(KEY_USER_DATA, gson.toJson(user))
             .apply()
+    }
+
+    fun saveFaceTemplates(templates: List<FaceTemplateData>) {
+        encryptedPrefs.edit()
+            .putString(KEY_FACE_TEMPLATES, gson.toJson(templates))
+            .apply()
+    }
+
+    fun getFaceTemplates(): List<FaceTemplateData> {
+        val json = encryptedPrefs.getString(KEY_FACE_TEMPLATES, null)
+        return json?.let { gson.fromJson(it, faceTemplatesType) } ?: emptyList()
+    }
+
+    fun getFaceTemplate(surveyorId: String): FaceTemplateData? {
+        return getFaceTemplates().firstOrNull { it.surveyorId == surveyorId }
+    }
+
+    fun hasFaceTemplate(surveyorId: String): Boolean {
+        return getFaceTemplate(surveyorId)?.template?.isNotBlank() == true
     }
 
     fun getAccessToken(): String? = tokenStore.accessToken()

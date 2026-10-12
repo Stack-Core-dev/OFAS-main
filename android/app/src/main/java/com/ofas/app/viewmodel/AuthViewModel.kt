@@ -4,8 +4,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ofas.app.repository.AuthRepository
 import com.ofas.data.sync.ApiService
+import com.ofas.data.sync.FaceTemplateData
 import com.ofas.data.sync.LoginRequest
 import com.ofas.data.sync.LoginResponse
+import com.ofas.data.sync.SyncFieldsResponse
 import com.ofas.data.sync.UserData
 import com.ofas.data.repository.FieldRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,6 +36,7 @@ class AuthViewModel @Inject constructor(
         data object Idle : AuthState()
         data class Authenticated(val user: UserData) : AuthState()
         data class RequiresFaceAuth(val user: UserData) : AuthState()
+        data class RequiresFaceEnrollment(val user: UserData) : AuthState()
         data object Unauthenticated : AuthState()
     }
 
@@ -44,7 +47,11 @@ class AuthViewModel @Inject constructor(
     private fun checkAuthStatus() {
         val user = authRepository.getUserData()
         if (user != null && (authRepository.isDeviceEnrolled() || authRepository.isTokenValid())) {
-            _authState.value = AuthState.RequiresFaceAuth(user)
+            if (user.role == "surveyor" && !authRepository.hasFaceTemplate(user.id)) {
+                _authState.value = AuthState.RequiresFaceEnrollment(user)
+            } else {
+                _authState.value = AuthState.RequiresFaceAuth(user)
+            }
         } else {
             _authState.value = AuthState.Unauthenticated
         }
@@ -60,13 +67,23 @@ class AuthViewModel @Inject constructor(
                 if (response.isSuccessful && response.body() != null) {
                     val loginResponse = response.body()!!
                     authRepository.saveAuthData(loginResponse)
-                    if (loginResponse.user.role == "surveyor" && !syncAssignedFields()) {
-                        authRepository.clearAuthData()
-                        _error.value = "Login succeeded, but assigned fields could not be downloaded."
-                        _authState.value = AuthState.Unauthenticated
-                        return@launch
+                    if (loginResponse.user.role == "surveyor") {
+                        val syncResult = syncAssignedFields()
+                        if (!syncResult) {
+                            authRepository.clearAuthData()
+                            _error.value = "Login succeeded, but assigned fields could not be downloaded."
+                            _authState.value = AuthState.Unauthenticated
+                            return@launch
+                        }
+                        // Check if surveyor has face template after sync
+                        if (!authRepository.hasFaceTemplate(loginResponse.user.id)) {
+                            _authState.value = AuthState.RequiresFaceEnrollment(loginResponse.user)
+                        } else {
+                            _authState.value = AuthState.RequiresFaceAuth(loginResponse.user)
+                        }
+                    } else {
+                        _authState.value = AuthState.Authenticated(loginResponse.user)
                     }
-                    _authState.value = AuthState.RequiresFaceAuth(loginResponse.user)
                 } else {
                     _error.value = response.message().ifBlank { "Login failed" }
                     _authState.value = AuthState.Unauthenticated
@@ -86,8 +103,11 @@ class AuthViewModel @Inject constructor(
         return try {
             val response = apiService.getAssignedFields(authHeader)
             if (!response.isSuccessful || response.body() == null) return false
-            val fields = response.body()!!.fields.map { it.toEntity() }
+            val syncResponse = response.body()!!
+            val fields = syncResponse.fields.map { it.toEntity() }
             fieldRepository.replaceAssignedFields(fields)
+            // Save face templates from sync response
+            authRepository.saveFaceTemplates(syncResponse.faceTemplates)
             true
         } catch (_: Exception) {
             false
@@ -97,6 +117,14 @@ class AuthViewModel @Inject constructor(
     fun completeFaceAuth() {
         val currentState = _authState.value
         if (currentState is AuthState.RequiresFaceAuth) {
+            authRepository.markDeviceEnrolled()
+            _authState.value = AuthState.Authenticated(currentState.user)
+        }
+    }
+
+    fun completeFaceEnrollment() {
+        val currentState = _authState.value
+        if (currentState is AuthState.RequiresFaceEnrollment) {
             authRepository.markDeviceEnrolled()
             _authState.value = AuthState.Authenticated(currentState.user)
         }

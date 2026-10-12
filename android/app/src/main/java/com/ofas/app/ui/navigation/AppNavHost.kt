@@ -14,6 +14,7 @@ import com.ofas.app.ui.screen.ReviewScreen
 import com.ofas.app.ui.screen.SuccessScreen
 import com.ofas.app.ui.screen.auth.AuthScreen
 import com.ofas.app.ui.screen.FaceVerificationScreen
+import com.ofas.app.ui.screen.auth.FaceEnrollmentScreen
 
 @Composable
 fun AppNavHost(navController: NavHostController) {
@@ -47,6 +48,19 @@ fun AppNavHost(navController: NavHostController) {
             FieldSelectionScreen(
                 onFieldSelected = { field, surveyorId ->
                     navController.navigate(NavRoutes.faceVerification(surveyorId, field.id))
+                }
+            )
+        }
+
+        composable(NavRoutes.FACE_ENROLLMENT) {
+            FaceEnrollmentScreen(
+                onEnrolled = {
+                    navController.navigate(NavRoutes.HOME) {
+                        popUpTo(NavRoutes.AUTH) { inclusive = true }
+                    }
+                },
+                onCancel = {
+                    navController.popBackStack()
                 }
             )
         }
