@@ -1,4 +1,5 @@
 from datetime import datetime, date
+import re
 from typing import List, Optional
 from flask import Blueprint, request, jsonify, g
 from sqlalchemy.orm import Session
@@ -13,7 +14,8 @@ from .database import get_db
 from .auth import require_admin, require_super_admin, get_current_user_id, hash_password, verify_password
 from .validation import (
     validate_field_payload, validate_surveyor_payload,
-    validate_assignment_payload, validate_password
+    validate_assignment_payload, validate_password, validate_email,
+    validate_username
 )
 from .audit import create_audit_logger, AUDIT_ACTIONS
 
@@ -55,11 +57,13 @@ def list_users():
 def create_user():
     db = next(get_db())
     audit = create_audit_logger(db)
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     
     if not data or not all(k in data for k in ('username', 'email', 'password', 'role')):
         return jsonify({'error': 'Missing required fields'}), 400
     
+    if not isinstance(data['username'], str) or not validate_username(data['username']):
+        return jsonify({'error': 'Invalid username'}), 400
     if not validate_email(data['email']):
         return jsonify({'error': 'Invalid email'}), 400
     
@@ -107,26 +111,37 @@ def create_user():
 def update_user(user_id):
     db = next(get_db())
     audit = create_audit_logger(db)
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return jsonify({'error': 'User not found'}), 404
+    if not isinstance(data, dict) or not data:
+        return jsonify({'error': 'At least one user property is required'}), 400
     
     old_values = {'username': user.username, 'email': user.email, 'role': user.role.value, 'is_active': user.is_active}
     
     if 'email' in data:
-        if not validate_email(data['email']):
+        if not isinstance(data['email'], str) or not validate_email(data['email']):
             return jsonify({'error': 'Invalid email'}), 400
         user.email = data['email']
     if 'role' in data:
         try:
-            user.role = UserRole(data['role'])
+            next_role = UserRole(data['role'])
         except ValueError:
             return jsonify({'error': 'Invalid role'}), 400
+        if str(user.id) == str(get_current_user_id()) and next_role != user.role:
+            return jsonify({'error': 'You cannot change your own role'}), 400
+        user.role = next_role
     if 'is_active' in data:
+        if not isinstance(data['is_active'], bool):
+            return jsonify({'error': 'is_active must be a boolean'}), 400
+        if str(user.id) == str(get_current_user_id()) and data['is_active'] is False:
+            return jsonify({'error': 'You cannot deactivate your own account'}), 400
         user.is_active = data['is_active']
     if 'password' in data:
+        if not isinstance(data['password'], str):
+            return jsonify({'error': 'Password must be text'}), 400
         valid, errors = validate_password(data['password'])
         if not valid:
             return jsonify({'error': 'Weak password', 'details': errors}), 400
@@ -271,22 +286,44 @@ def create_surveyor():
 def update_surveyor(surveyor_id):
     db = next(get_db())
     audit = create_audit_logger(db)
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     
     surveyor = db.query(Surveyor).filter(Surveyor.id == surveyor_id).first()
     if not surveyor:
         return jsonify({'error': 'Surveyor not found'}), 404
+    if not isinstance(data, dict) or not data:
+        return jsonify({'error': 'At least one surveyor property is required'}), 400
     
     old_values = {'employee_id': surveyor.employee_id, 'full_name': surveyor.full_name, 'is_active': surveyor.is_active}
     
     if 'full_name' in data:
+        if not isinstance(data['full_name'], str) or not data['full_name'].strip() or len(data['full_name'].strip()) > 200:
+            return jsonify({'error': 'Full name must be 1-200 characters'}), 400
         surveyor.full_name = data['full_name']
     if 'phone_number' in data:
+        if not isinstance(data['phone_number'], str) or not re.match(r'^\+?[1-9]\d{1,14}$', data['phone_number']):
+            return jsonify({'error': 'Invalid phone number format'}), 400
         surveyor.phone_number = data['phone_number']
     if 'email' in data:
+        if data['email'] != surveyor.email and data['email'] and not validate_email(data['email']):
+            return jsonify({'error': 'Invalid email'}), 400
         surveyor.email = data['email']
     if 'is_active' in data:
+        if not isinstance(data['is_active'], bool):
+            return jsonify({'error': 'is_active must be a boolean'}), 400
         surveyor.is_active = data['is_active']
+    if 'password' in data:
+        if not isinstance(data['password'], str):
+            return jsonify({'error': 'Password must be text'}), 400
+        valid, errors = validate_password(data['password'])
+        if not valid:
+            return jsonify({'error': 'Weak password', 'details': errors}), 400
+        user = db.query(User).filter(User.username == surveyor.employee_id).first()
+        if user:
+            user.password_hash = hash_password(data['password'])
+    user = db.query(User).filter(User.username == surveyor.employee_id).first()
+    if user and 'is_active' in data:
+        user.is_active = data['is_active']
     if 'face_template' in data:
         surveyor.face_template = data['face_template']
         surveyor.face_template_version += 1
@@ -315,6 +352,8 @@ def delete_surveyor(surveyor_id):
     surveyor = db.query(Surveyor).filter(Surveyor.id == surveyor_id).first()
     if not surveyor:
         return jsonify({'error': 'Surveyor not found'}), 404
+    if not surveyor.is_active:
+        return jsonify({'message': 'Surveyor already inactive'})
     surveyor.is_active = False
     user = db.query(User).filter(User.username == surveyor.employee_id).first()
     if user:

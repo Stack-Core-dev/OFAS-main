@@ -4,7 +4,7 @@ from flask import Blueprint, request, jsonify, g
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, or_
 
-from .models import Visit, Surveyor, Field, User, VisitStatus
+from .models import Visit, Surveyor, Field, User, TrailEntry, VisitStatus
 from .database import get_db
 from .auth import require_admin, get_current_user_id
 from .audit import create_audit_logger

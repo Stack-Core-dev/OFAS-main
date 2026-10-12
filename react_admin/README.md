@@ -14,6 +14,10 @@ an account from the Users table. Deactivation is a soft operation that preserves
 the account and audit history while preventing future login. The authenticated
 administrator cannot deactivate their own account.
 
+The **Visit Details** tab lists surveyor visits with surveyor and status
+filters. Selecting a visit shows its field, coordinates, GPS accuracy, phone,
+verification results, review state, notes, and recorded trail-point count.
+
 ## Development
 
 ```powershell

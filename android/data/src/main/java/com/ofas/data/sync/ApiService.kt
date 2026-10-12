@@ -151,11 +151,14 @@ data class SyncStatusResponse(
 data class LoginRequest(
     val username: String,
     val password: String,
+    @Json(name = "totp_token")
     val totpToken: String?
 )
 
 data class LoginResponse(
+    @Json(name = "access_token")
     val accessToken: String,
+    @Json(name = "refresh_token")
     val refreshToken: String,
     val user: UserData
 )

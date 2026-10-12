@@ -25,6 +25,7 @@ export type Metrics = {
 export type Visit = {
   id: string;
   visit_id: string;
+  surveyor_id: string;
   surveyor_name: string | null;
   field_code: string | null;
   satellite_timestamp: string;
@@ -33,6 +34,38 @@ export type Visit = {
   review_status: string | null;
   status: string;
   accuracy_meters: number | null;
+  altitude?: number | null;
+  speed?: number | null;
+  bearing?: number | null;
+  selfie_photo_s3_key?: string | null;
+  field_photos?: unknown;
+  face_match_score?: number | null;
+  liveness_verified?: boolean;
+  synced_at?: string | null;
+  review_notes?: string | null;
+};
+
+export type VisitDetail = {
+  visit: Visit & {
+    surveyor: { id: string; employee_id: string; full_name: string } | null;
+    field: { id: string; field_code: string; name: string; center_lat: number; center_lon: number; radius_meters: number } | null;
+    phone_id: string;
+    selfie_photo_hash: string;
+    trail_snapshot: unknown;
+    signature: string;
+    signed_by_key_id: string;
+    reviewed_by: string | null;
+    reviewed_at: string | null;
+  };
+  trail_entries: Array<{
+    sequence_number: number;
+    satellite_timestamp: string;
+    latitude: number;
+    longitude: number;
+    accuracy_meters: number;
+    entry_hash: string;
+    prev_hash: string | null;
+  }>;
 };
 
 export type Surveyor = {
@@ -150,8 +183,14 @@ export async function login(username: string, password: string, totpToken?: stri
 
 export const api = {
   metrics: () => request<Metrics>("/health/metrics"),
-  visits: () => request<{ visits: Visit[] }>("/api/review/visits?per_page=10"),
-  surveyors: () => request<{ surveyors: Surveyor[] }>("/api/admin/surveyors?per_page=100"),
+  visits: (params: { per_page?: number; status?: string; surveyor_id?: string } = {}) => {
+    const query = new URLSearchParams({ per_page: String(params.per_page ?? 100) });
+    if (params.status) query.set("status", params.status);
+    if (params.surveyor_id) query.set("surveyor_id", params.surveyor_id);
+    return request<{ visits: Visit[]; pagination: { total: number } }>(`/api/review/visits?${query.toString()}`);
+  },
+  visitDetail: (id: string) => request<VisitDetail>(`/api/review/visits/${id}`),
+  surveyors: () => request<{ surveyors: Surveyor[] }>("/api/admin/surveyors?per_page=100&active=false"),
   fields: () => request<{ fields: Field[] }>("/api/admin/fields?per_page=100"),
   assignments: () => request<{ assignments: Assignment[] }>("/api/admin/assignments?per_page=200"),
   users: () => request<{ users: ManagedUser[] }>("/api/admin/users?per_page=100"),
@@ -165,7 +204,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...payload, role: "admin" })
     }),
-  updateUser: (id: string, payload: { email?: string; password?: string }) =>
+  updateUser: (id: string, payload: { email?: string; password?: string; is_active?: boolean }) =>
     request<{ message: string }>(`/api/admin/users/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteUser: (id: string) =>
     request<{ message: string }>(`/api/admin/users/${id}`, { method: "DELETE" }),
@@ -179,7 +218,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload)
     }),
-  updateSurveyor: (id: string, payload: { full_name: string; phone_number: string }) =>
+  updateSurveyor: (id: string, payload: { full_name?: string; phone_number?: string; password?: string; is_active?: boolean }) =>
     request<{ message: string }>(`/api/admin/surveyors/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   deleteSurveyor: (id: string) =>
     request<{ message: string }>(`/api/admin/surveyors/${id}`, { method: "DELETE" }),

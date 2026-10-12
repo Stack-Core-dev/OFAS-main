@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { api, Assignment, currentSession, Field, ManagedUser, Metrics, Surveyor, Visit, login, logout } from "./api";
+import { api, Assignment, currentSession, Field, ManagedUser, Metrics, Surveyor, Visit, VisitDetail, login, logout } from "./api";
 
 type Section = "overview" | "users" | "visits" | "surveyors" | "fields" | "assignments";
 
@@ -31,7 +31,7 @@ function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
 
   return <main className="login-shell">
     <form className="login-card" onSubmit={submit}>
-      <div className="brand-mark">O</div>
+      <img className="brand-logo login-logo" src="/as-logo.jpg" alt="Army Welfare Trust logo" />
       <p className="eyebrow">FIELD ACTIVITY VERIFICATION</p>
       <h1>OFAS Admin</h1>
       <p className="muted">Review evidence and manage field operations.</p>
@@ -54,7 +54,7 @@ function Dashboard({ username, role, onLogout }: { username: string; role: strin
   const [error, setError] = useState("");
 
   useEffect(() => {
-    Promise.allSettled([api.metrics(), api.users(), api.visits(), api.surveyors(), api.fields(), api.assignments()])
+    Promise.allSettled([api.metrics(), api.users(), api.visits({ per_page: 100 }), api.surveyors(), api.fields(), api.assignments()])
       .then(([metricsResult, usersResult, visitsResult, surveyorsResult, fieldsResult, assignmentsResult]) => {
         const failures: string[] = [];
         if (metricsResult.status === "fulfilled") setMetrics(metricsResult.value);
@@ -76,24 +76,24 @@ function Dashboard({ username, role, onLogout }: { username: string; role: strin
   const nav = (next: Section) => setSection(next);
   return <div className="app-shell">
     <aside className="sidebar">
-      <div className="sidebar-brand"><span className="brand-mark small">O</span><span>OFAS</span></div>
+      <div className="sidebar-brand"><img className="brand-logo sidebar-logo" src="/as-logo.jpg" alt="Army Welfare Trust logo" /><span>OFAS</span></div>
       <p className="eyebrow sidebar-label">ADMIN CONSOLE</p>
       <nav>
         {(["overview", "users", "visits", "surveyors", "fields", "assignments"] as Section[]).map((item) =>
           <button key={item} className={section === item ? "nav-item active" : "nav-item"} onClick={() => nav(item)}>
             <span>{item === "overview" ? "▦" : item === "users" ? "♙" : item === "visits" ? "◷" : item === "surveyors" ? "♟" : item === "fields" ? "⌖" : "⇄"}</span>
-            {item[0].toUpperCase() + item.slice(1)}
+            {item === "visits" ? "Visit Details" : item[0].toUpperCase() + item.slice(1)}
           </button>
         )}
       </nav>
       <div className="sidebar-footer"><span className="status-dot" /> Backend connected</div>
     </aside>
     <main className="content">
-      <header className="topbar"><div><p className="eyebrow">CONTROL CENTER</p><h2>{section[0].toUpperCase() + section.slice(1)}</h2></div><div className="user-menu"><span>{username}</span><small>{role.replace("_", " ")}</small><button onClick={onLogout}>Sign out</button></div></header>
+      <header className="topbar"><div><p className="eyebrow">CONTROL CENTER</p><h2>{section === "visits" ? "Visit Details" : section[0].toUpperCase() + section.slice(1)}</h2></div><div className="user-menu"><span>{username}</span><small>{role.replace("_", " ")}</small><button onClick={onLogout}>Sign out</button></div></header>
       {error && <div className="error banner">{error}</div>}
       {section === "overview" && <Overview metrics={metrics} visits={visits} onNavigate={nav} />}
       {section === "users" && <Users users={users} surveyors={surveyors} canCreateAdmin={role === "super_admin"} onSurveyorCreated={(surveyor) => setSurveyors((current) => [surveyor, ...current])} onAdminCreated={(user) => setUsers((current) => [user, ...current])} onUsersChanged={setUsers} onSurveyorsChanged={setSurveyors} />}
-      {section === "visits" && <DataTable title="Recent visits" headers={["Visit", "Surveyor", "Field", "Time", "Review"]} rows={visits.map((visit) => [visit.visit_id, visit.surveyor_name ?? "—", visit.field_code ?? "—", new Date(visit.satellite_timestamp).toLocaleString(), visit.review_status ?? "pending"])} />}
+      {section === "visits" && <VisitDetails visits={visits} surveyors={surveyors} />}
       {section === "surveyors" && <Surveyors surveyors={surveyors} onChanged={(next) => setSurveyors(next)} />}
       {section === "fields" && <Fields fields={fields} assignments={assignments} onFieldCreated={(field) => setFields((current) => [field, ...current])} onChanged={(next) => setFields(next)} />}
       {section === "assignments" && <Assignments assignments={assignments} surveyors={surveyors} fields={fields} onAssignmentCreated={(assignment) => setAssignments((current) => [assignment, ...current])} onChanged={(next) => setAssignments(next)} />}
@@ -116,6 +116,7 @@ function Assignments({ assignments, surveyors, fields, onAssignmentCreated, onCh
         setError("Select a surveyor, field, start date, and end date.");
         return;
       }
+
       if (form.end_date < form.start_date) {
         setError("End date must be on or after the start date.");
         return;
@@ -179,6 +180,84 @@ function Assignments({ assignments, surveyors, fields, onAssignmentCreated, onCh
       ])} />
     </section>
   </div>;
+}
+
+function VisitDetails({ visits, surveyors }: { visits: Visit[]; surveyors: Surveyor[] }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
+  const [surveyorId, setSurveyorId] = useState("");
+  const [filteredVisits, setFilteredVisits] = useState(visits);
+  const [detail, setDetail] = useState<VisitDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const next = visits.filter((visit) =>
+      (!status || visit.review_status === status || visit.status === status) &&
+      (!surveyorId || visit.surveyor_id === surveyorId)
+    );
+    setFilteredVisits(next);
+    if (selectedId && !next.some((visit) => visit.id === selectedId)) {
+      setSelectedId(null);
+      setDetail(null);
+    }
+  }, [visits, status, surveyorId, selectedId]);
+
+  async function selectVisit(id: string) {
+    setSelectedId(id);
+    setLoading(true);
+    setError("");
+    try {
+      setDetail(await api.visitDetail(id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load visit details.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return <div className="page">
+    <section className="panel">
+      <div className="panel-heading">
+        <div><p className="eyebrow">AUDIT TRAIL</p><h3>Visit details</h3><p className="muted">Review field visits submitted by surveyors.</p></div>
+      </div>
+      <div className="filter-bar">
+        <label>Surveyor<select value={surveyorId} onChange={(event) => setSurveyorId(event.target.value)}><option value="">All surveyors</option>{surveyors.map((surveyor) => <option key={surveyor.id} value={surveyor.id}>{surveyor.employee_id} — {surveyor.full_name}</option>)}</select></label>
+        <label>Status<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{["queued", "syncing", "synced", "failed", "valid", "invalid", "flagged"].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+      </div>
+      {error && <div className="error">{error}</div>}
+      <DataTable title="" headers={["Visit", "Surveyor", "Field", "Captured", "GPS", "Status", "Review"]} rows={filteredVisits.map((visit) => [
+        <button type="button" className="link-button" onClick={() => void selectVisit(visit.id)}>{visit.visit_id}</button>,
+        visit.surveyor_name ?? "—",
+        visit.field_code ?? "—",
+        new Date(visit.satellite_timestamp).toLocaleString(),
+        `${visit.latitude.toFixed(5)}, ${visit.longitude.toFixed(5)}`,
+        visit.status,
+        visit.review_status ?? "Unreviewed"
+      ])} />
+    </section>
+    {selectedId && <section className="panel detail-panel">
+      <div className="panel-heading"><div><p className="eyebrow">SELECTED VISIT</p><h3>{detail?.visit.visit_id ?? selectedId}</h3></div>{loading && <span className="muted">Loading...</span>}</div>
+      {detail && <div className="detail-grid">
+        <DetailItem label="Surveyor" value={detail.visit.surveyor ? `${detail.visit.surveyor.employee_id} — ${detail.visit.surveyor.full_name}` : "—"} />
+        <DetailItem label="Field" value={detail.visit.field ? `${detail.visit.field.field_code} — ${detail.visit.field.name}` : "—"} />
+        <DetailItem label="Captured" value={new Date(detail.visit.satellite_timestamp).toLocaleString()} />
+        <DetailItem label="Coordinates" value={`${detail.visit.latitude}, ${detail.visit.longitude}`} />
+        <DetailItem label="GPS accuracy" value={`${detail.visit.accuracy_meters} m`} />
+        <DetailItem label="Phone" value={detail.visit.phone_id} />
+        <DetailItem label="Visit status" value={detail.visit.status} />
+        <DetailItem label="Review" value={detail.visit.review_status ?? "Unreviewed"} />
+        <DetailItem label="Face match" value={detail.visit.face_match_score == null ? "—" : `${(detail.visit.face_match_score * 100).toFixed(1)}%`} />
+        <DetailItem label="Liveness" value={detail.visit.liveness_verified ? "Verified" : "Not verified"} />
+        <DetailItem label="Trail points" value={String(detail.trail_entries.length)} />
+        <DetailItem label="Review notes" value={detail.visit.review_notes ?? "—"} />
+      </div>}
+    </section>}
+  </div>;
+}
+
+function DetailItem({ label, value }: { label: string; value: string }) {
+  return <div className="detail-item"><span>{label}</span><strong>{value}</strong></div>;
 }
 
 function Fields({ fields, assignments, onFieldCreated, onChanged }: { fields: Field[]; assignments: Assignment[]; onFieldCreated: (field: Field) => void; onChanged: (fields: Field[]) => void }) {
@@ -268,26 +347,78 @@ function Fields({ fields, assignments, onFieldCreated, onChanged }: { fields: Fi
 }
 
 function Surveyors({ surveyors, onChanged }: { surveyors: Surveyor[]; onChanged: (surveyors: Surveyor[]) => void }) {
-  return <div className="page"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">FIELD OPERATIONS</p><h3>Surveyors</h3><p className="muted">Edit or deactivate surveyor accounts.</p></div></div>
+  const [editing, setEditing] = useState<Surveyor | null>(null);
+  const [form, setForm] = useState({ full_name: "", phone_number: "", password: "" });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function beginEdit(surveyor: Surveyor) {
+    setEditing(surveyor);
+    setForm({ full_name: surveyor.full_name, phone_number: surveyor.phone_number ?? "", password: "" });
+    setError("");
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (!editing) return;
+    if (!form.full_name.trim() || !/^\+?[1-9]\d{1,14}$/.test(form.phone_number)) {
+      setError("Enter a name and a valid phone number.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateSurveyor(editing.id, {
+        full_name: form.full_name.trim(),
+        phone_number: form.phone_number,
+        ...(form.password ? { password: form.password } : {})
+      });
+      onChanged(surveyors.map((item) => item.id === editing.id
+        ? { ...item, full_name: form.full_name.trim(), phone_number: form.phone_number }
+        : item));
+      setEditing(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to update surveyor.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggle(surveyor: Surveyor) {
+    const action = surveyor.is_active ? "deactivate" : "activate";
+    if (!window.confirm(`Are you sure you want to ${action} ${surveyor.full_name}?`)) return;
+    try {
+      await api.updateSurveyor(surveyor.id, { is_active: !surveyor.is_active });
+      onChanged(surveyors.map((item) => item.id === surveyor.id ? { ...item, is_active: !surveyor.is_active } : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Unable to ${action} surveyor.`);
+    }
+  }
+
+  return <div className="page"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">FIELD OPERATIONS</p><h3>Surveyors</h3><p className="muted">Edit or activate/deactivate surveyor accounts.</p></div></div>
+    {editing && <form className="create-form edit-form" onSubmit={save}>
+      <div className="form-heading"><div><h3>Edit surveyor</h3><p className="muted">Update profile details or set a new password.</p></div><button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button></div>
+      <div className="form-grid">
+        <label>Full name<input required maxLength={200} value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
+        <label>Phone number<input required type="tel" value={form.phone_number} onChange={(event) => setForm({ ...form, phone_number: event.target.value })} /></label>
+        <label>New password<input minLength={12} type="password" placeholder="Leave blank to keep current password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>
+      </div>
+      {error && <div className="error">{error}</div>}
+      <button className="primary" disabled={busy}>{busy ? "Saving..." : "Save surveyor"}</button>
+    </form>}
     <DataTable title="" headers={["Employee ID", "Name", "Phone", "Email", "Status", "Actions"]} rows={surveyors.map((surveyor) => [
       surveyor.employee_id, surveyor.full_name, surveyor.phone_number ?? "—", surveyor.email ?? "—", surveyor.is_active ? "Active" : "Inactive",
-      <Actions key={surveyor.id}
-        onEdit={async () => {
-          const name = window.prompt("Surveyor full name", surveyor.full_name);
-          const phone = window.prompt("Phone number", surveyor.phone_number ?? "");
-          if (!name || !phone) return;
-          try { await api.updateSurveyor(surveyor.id, { full_name: name, phone_number: phone }); onChanged(surveyors.map((item) => item.id === surveyor.id ? { ...item, full_name: name, phone_number: phone } : item)); } catch (cause) { window.alert(cause instanceof Error ? cause.message : "Unable to update surveyor."); }
-        }}
-        onDelete={async () => {
-          if (!window.confirm("Deactivate this surveyor account?")) return;
-          try { await api.deleteSurveyor(surveyor.id); onChanged(surveyors.map((item) => item.id === surveyor.id ? { ...item, is_active: false } : item)); } catch (cause) { window.alert(cause instanceof Error ? cause.message : "Unable to deactivate surveyor."); }
-        }} />
+      <Actions key={surveyor.id} onEdit={() => beginEdit(surveyor)} onToggle={() => toggle(surveyor)} active={surveyor.is_active} />
     ])} />
   </section></div>;
 }
 
-function Actions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) {
-  return <div className="row-actions"><button type="button" className="link-button" onClick={onEdit}>Edit</button><button type="button" className="link-button danger" onClick={onDelete}>Delete</button></div>;
+function Actions({ onEdit, onDelete, onToggle, active = true }: { onEdit: () => void; onDelete?: () => void; onToggle?: () => void; active?: boolean }) {
+  return <div className="row-actions">
+    <button type="button" className="link-button" onClick={onEdit}>Edit</button>
+    {onToggle && <button type="button" className="link-button danger" onClick={onToggle}>{active ? "Deactivate" : "Activate"}</button>}
+    {onDelete && <button type="button" className="link-button danger" onClick={onDelete}>Delete</button>}
+  </div>;
 }
 
 function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCreated, onUsersChanged, onSurveyorsChanged }: { users: ManagedUser[]; surveyors: Surveyor[]; canCreateAdmin: boolean; onSurveyorCreated: (surveyor: Surveyor) => void; onAdminCreated: (user: ManagedUser) => void; onUsersChanged: (users: ManagedUser[]) => void; onSurveyorsChanged: (surveyors: Surveyor[]) => void }) {
@@ -296,6 +427,11 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
   const [busy, setBusy] = useState(false);
   const [adminForm, setAdminForm] = useState({ username: "", email: "", password: "" });
   const [surveyorForm, setSurveyorForm] = useState({ employee_id: "", full_name: "", phone_number: "", password: "" });
+  const [editing, setEditing] = useState<{ type: "admin" | "surveyor"; id: string } | null>(null);
+  const [editError, setEditError] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [adminEdit, setAdminEdit] = useState({ email: "", password: "" });
+  const [surveyorEdit, setSurveyorEdit] = useState({ full_name: "", phone_number: "", password: "" });
 
   async function submitForm(event: FormEvent) {
     event.preventDefault();
@@ -307,6 +443,7 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
           setError("Username may contain only letters, numbers, underscores, and hyphens.");
           return;
         }
+
         const response = await api.createAdmin(adminForm);
         onAdminCreated({
           id: response.id, username: adminForm.username, email: adminForm.email, role: "admin",
@@ -332,6 +469,77 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
       setError(cause instanceof Error ? cause.message : `Unable to create ${formType ?? "account"}.`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  function beginAdminEdit(user: ManagedUser) {
+    setEditing({ type: "admin", id: user.id });
+    setAdminEdit({ email: user.email, password: "" });
+    setEditError("");
+  }
+
+  function beginSurveyorEdit(surveyor: Surveyor) {
+    setEditing({ type: "surveyor", id: surveyor.id });
+    setSurveyorEdit({ full_name: surveyor.full_name, phone_number: surveyor.phone_number ?? "", password: "" });
+    setEditError("");
+  }
+
+  async function saveEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editing) return;
+    setEditError("");
+    setEditBusy(true);
+    try {
+      if (editing.type === "admin") {
+        if (!adminEdit.email || !adminEdit.email.includes("@")) {
+          setEditError("Enter a valid administrator email.");
+          return;
+        }
+        const payload = { email: adminEdit.email, ...(adminEdit.password ? { password: adminEdit.password } : {}) };
+        await api.updateUser(editing.id, payload);
+        onUsersChanged(users.map((user) => user.id === editing.id ? { ...user, email: adminEdit.email } : user));
+      } else {
+        if (!surveyorEdit.full_name.trim() || !/^\+?[1-9]\d{1,14}$/.test(surveyorEdit.phone_number)) {
+          setEditError("Enter a name and a valid phone number.");
+          return;
+        }
+        const payload = {
+          full_name: surveyorEdit.full_name.trim(),
+          phone_number: surveyorEdit.phone_number,
+          ...(surveyorEdit.password ? { password: surveyorEdit.password } : {})
+        };
+        await api.updateSurveyor(editing.id, payload);
+        onSurveyorsChanged(surveyors.map((surveyor) => surveyor.id === editing.id
+          ? { ...surveyor, full_name: payload.full_name, phone_number: payload.phone_number }
+          : surveyor));
+      }
+      setEditing(null);
+    } catch (cause) {
+      setEditError(cause instanceof Error ? cause.message : "Unable to save changes.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  async function toggleAdmin(user: ManagedUser) {
+    const action = user.is_active ? "deactivate" : "activate";
+    if (!window.confirm(`Are you sure you want to ${action} ${user.username}?`)) return;
+    try {
+      await api.updateUser(user.id, { is_active: !user.is_active });
+      onUsersChanged(users.map((item) => item.id === user.id ? { ...item, is_active: !user.is_active } : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Unable to ${action} administrator.`);
+    }
+  }
+
+  async function toggleSurveyor(surveyor: Surveyor) {
+    const action = surveyor.is_active ? "deactivate" : "activate";
+    if (!window.confirm(`Are you sure you want to ${action} ${surveyor.full_name}?`)) return;
+    try {
+      await api.updateSurveyor(surveyor.id, { is_active: !surveyor.is_active });
+      onSurveyorsChanged(surveyors.map((item) => item.id === surveyor.id ? { ...item, is_active: !surveyor.is_active } : item));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : `Unable to ${action} surveyor.`);
     }
   }
 
@@ -366,6 +574,25 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
         {error && <div className="error">{error}</div>}
         <button className="primary" disabled={busy}>{busy ? "Creating..." : "Create surveyor"}</button>
       </form>}
+      {editing?.type === "admin" && <form className="create-form edit-form" onSubmit={saveEdit}>
+        <div className="form-heading"><div><h3>Edit administrator</h3><p className="muted">Update the email or leave the password blank to keep it unchanged.</p></div><button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button></div>
+        <div className="form-grid">
+          <label>Email<input required type="email" value={adminEdit.email} onChange={(event) => setAdminEdit({ ...adminEdit, email: event.target.value })} /></label>
+          <label>New password<input minLength={12} type="password" placeholder="Leave blank to keep current password" value={adminEdit.password} onChange={(event) => setAdminEdit({ ...adminEdit, password: event.target.value })} /></label>
+        </div>
+        {editError && <div className="error">{editError}</div>}
+        <button className="primary" disabled={editBusy}>{editBusy ? "Saving..." : "Save administrator"}</button>
+      </form>}
+      {editing?.type === "surveyor" && <form className="create-form edit-form" onSubmit={saveEdit}>
+        <div className="form-heading"><div><h3>Edit surveyor</h3><p className="muted">Update profile details or set a new password.</p></div><button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button></div>
+        <div className="form-grid">
+          <label>Full name<input required maxLength={200} value={surveyorEdit.full_name} onChange={(event) => setSurveyorEdit({ ...surveyorEdit, full_name: event.target.value })} /></label>
+          <label>Phone number<input required type="tel" value={surveyorEdit.phone_number} onChange={(event) => setSurveyorEdit({ ...surveyorEdit, phone_number: event.target.value })} /></label>
+          <label>New password<input minLength={12} type="password" placeholder="Leave blank to keep current password" value={surveyorEdit.password} onChange={(event) => setSurveyorEdit({ ...surveyorEdit, password: event.target.value })} /></label>
+        </div>
+        {editError && <div className="error">{editError}</div>}
+        <button className="primary" disabled={editBusy}>{editBusy ? "Saving..." : "Save surveyor"}</button>
+      </form>}
       <DataTable title="" headers={["Username", "Email", "Role", "MFA", "Created", "Last login", "Status", "Actions"]} rows={users.map((user) => [
         user.username,
         user.email,
@@ -375,53 +602,14 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
         user.last_login ? new Date(user.last_login).toLocaleString() : "Never",
         user.is_active ? "Active" : "Inactive",
         canCreateAdmin
-          ? <Actions key={user.id}
-              onEdit={async () => {
-                const email = window.prompt("Administrator email", user.email);
-                if (!email || email === user.email) return;
-                try {
-                  await api.updateUser(user.id, { email });
-                  onUsersChanged(users.map((item) => item.id === user.id ? { ...item, email } : item));
-                } catch (cause) {
-                  window.alert(cause instanceof Error ? cause.message : "Unable to update user.");
-                }
-              }}
-              onDelete={async () => {
-                if (!window.confirm("Deactivate this user account?")) return;
-                try {
-                  await api.deleteUser(user.id);
-                  onUsersChanged(users.map((item) => item.id === user.id ? { ...item, is_active: false } : item));
-                } catch (cause) {
-                  window.alert(cause instanceof Error ? cause.message : "Unable to deactivate user.");
-                }
-              }} />
+          ? <Actions key={user.id} onEdit={() => beginAdminEdit(user)} onToggle={() => toggleAdmin(user)} active={user.is_active} />
           : "—"
       ])} />
       <div className="subtable-heading"><h3>Surveyor accounts</h3><span className="muted">{surveyors.length} shown</span></div>
       <DataTable title="" headers={["Employee ID", "Name", "Phone", "Email", "Created", "Status", "Actions"]} rows={surveyors.map((surveyor) => [
         surveyor.employee_id, surveyor.full_name, surveyor.phone_number ?? "—", surveyor.email ?? "—",
         new Date(surveyor.created_at).toLocaleDateString(), surveyor.is_active ? "Active" : "Inactive",
-        <Actions key={surveyor.id}
-          onEdit={async () => {
-            const name = window.prompt("Surveyor full name", surveyor.full_name);
-            const phone = window.prompt("Phone number", surveyor.phone_number ?? "");
-            if (!name || !phone) return;
-            try {
-              await api.updateSurveyor(surveyor.id, { full_name: name, phone_number: phone });
-              onSurveyorsChanged(surveyors.map((item) => item.id === surveyor.id ? { ...item, full_name: name, phone_number: phone } : item));
-            } catch (cause) {
-              window.alert(cause instanceof Error ? cause.message : "Unable to update surveyor.");
-            }
-          }}
-          onDelete={async () => {
-            if (!window.confirm("Deactivate this surveyor account?")) return;
-            try {
-              await api.deleteSurveyor(surveyor.id);
-              onSurveyorsChanged(surveyors.map((item) => item.id === surveyor.id ? { ...item, is_active: false } : item));
-            } catch (cause) {
-              window.alert(cause instanceof Error ? cause.message : "Unable to deactivate surveyor.");
-            }
-          }} />
+        <Actions key={surveyor.id} onEdit={() => beginSurveyorEdit(surveyor)} onToggle={() => toggleSurveyor(surveyor)} active={surveyor.is_active} />
       ])} />
     </section>
   </div>;

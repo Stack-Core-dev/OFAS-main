@@ -14,7 +14,7 @@ android {
     defaultConfig {
         minSdk = 31
         targetSdk = 34
-        buildConfigField("String", "OFAS_API_BASE_URL", "\"http://192.168.0.33:5000/\"")
+        buildConfigField("String", "OFAS_API_BASE_URL", "\"http://10.10.4.133:5000/\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

@@ -23,6 +23,14 @@ an account. Deactivation is soft: the user record and audit history remain
 available, but the account can no longer authenticate. A super administrator
 cannot deactivate their own active session.
 
+### Visit details
+
+The dashboard's **Visit Details** tab provides an administrative view of
+surveyor-submitted visits. Administrators can filter visits by surveyor or
+status, select an individual visit, and inspect its field, capture coordinates,
+GPS accuracy, phone identifier, verification results, review state, notes, and
+trail-point count.
+
 ### Creating surveyor accounts
 
 Admins create surveyors from the React dashboard's **Users** tab. A surveyor

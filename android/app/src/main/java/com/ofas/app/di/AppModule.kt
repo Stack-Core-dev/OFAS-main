@@ -26,7 +26,7 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
-    private const val BASE_URL = "http://192.168.0.33:5000/"
+    private const val BASE_URL = "http://10.10.4.133:5000/"
 
     @Provides
     @Singleton
