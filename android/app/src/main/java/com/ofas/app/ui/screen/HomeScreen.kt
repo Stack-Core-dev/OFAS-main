@@ -19,6 +19,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
@@ -28,22 +30,40 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.ofas.app.viewmodel.AuthViewModel
+import com.ofas.app.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onStartVisit: () -> Unit,
     onSync: () -> Unit,
-    onSettings: () -> Unit
+    onSettings: () -> Unit,
+    onLoggedOut: () -> Unit
 ) {
+    val viewModel: HomeViewModel = hiltViewModel()
+    val authViewModel: AuthViewModel = hiltViewModel()
+
+    val userData by viewModel.userData.collectAsStateWithLifecycle()
+    val hasFaceTemplate by viewModel.hasFaceTemplate.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        viewModel.refresh()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -63,18 +83,58 @@ fun HomeScreen(
                 .padding(24.dp)
         ) {
             Column {
-                Text(
-                    text = "Welcome back",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Surveyor Dashboard",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        androidx.compose.material3.Text(
+                            text = "Welcome back",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        androidx.compose.material3.Text(
+                            text = userData?.username?.takeIf { it.isNotBlank() } ?: "Surveyor Dashboard",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+
+                    // Face Registration Status
+                    Card(
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (hasFaceTemplate) 
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
+                            else 
+                                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (hasFaceTemplate) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                contentDescription = if (hasFaceTemplate) "Face Registered" else "Face Not Registered",
+                                tint = if (hasFaceTemplate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            androidx.compose.material3.Text(
+                                text = if (hasFaceTemplate) "Face Registered" else "Face Not Registered",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (hasFaceTemplate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -105,7 +165,7 @@ fun HomeScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
+            androidx.compose.material3.Text(
                 text = "Quick Actions",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.SemiBold,
@@ -147,6 +207,18 @@ fun HomeScreen(
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 onClick = onSettings
             )
+
+            ActionCard(
+                title = "Sign Out",
+                subtitle = "Clear session and return to login",
+                icon = Icons.Default.Lock,
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                onClick = {
+                    authViewModel.logout()
+                    onLoggedOut()
+                }
+            )
         }
     }
 }
@@ -176,13 +248,13 @@ private fun StatCard(
             )
         }
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
+        androidx.compose.material3.Text(
             text = value,
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onPrimary
         )
-        Text(
+        androidx.compose.material3.Text(
             text = title,
             fontSize = 11.sp,
             color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
@@ -228,13 +300,13 @@ private fun ActionCard(
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
+                androidx.compose.material3.Text(
                     text = title,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = contentColor
                 )
-                Text(
+                androidx.compose.material3.Text(
                     text = subtitle,
                     fontSize = 13.sp,
                     color = contentColor.copy(alpha = 0.7f)

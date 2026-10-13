@@ -2,7 +2,6 @@ package com.ofas.app
 
 import android.app.Application
 import android.content.Context
-import androidx.room.Room
 import com.ofas.data.database.OFASDatabase
 import com.ofas.data.repository.FieldRepository
 import com.ofas.data.repository.SurveyorRepository
@@ -44,13 +43,7 @@ class OFASApplication : Application() {
             private set
 
         fun getDatabase(context: Context): OFASDatabase {
-            return _database ?: synchronized(this) {
-                _database ?: Room.databaseBuilder(
-                    context.applicationContext,
-                    OFASDatabase::class.java,
-                    "ofas.db"
-                ).build().also { _database = it }
-            }
+            return OFASDatabase.getInstance(context)
         }
 
         fun initializeRepositories(context: Context) {

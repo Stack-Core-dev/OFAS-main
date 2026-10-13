@@ -1,6 +1,7 @@
 package com.ofas.app.repository
 
 import android.content.Context
+import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.google.gson.Gson
@@ -43,12 +44,31 @@ class AuthRepository @Inject constructor(
     private val faceTemplatesType = object : TypeToken<List<FaceTemplateData>>() {}.type
 
     fun saveAuthData(response: LoginResponse) {
+        val expiry = parseJwtExpiry(response.accessToken) ?: (System.currentTimeMillis() + 3600000L)
         encryptedPrefs.edit()
             .putString(KEY_ACCESS_TOKEN, response.accessToken)
             .putString(KEY_REFRESH_TOKEN, response.refreshToken)
-            .putLong(KEY_TOKEN_EXPIRY, System.currentTimeMillis() + 3600000)
+            .putLong(KEY_TOKEN_EXPIRY, expiry)
             .apply()
         saveUserData(response.user)
+    }
+
+    private fun parseJwtExpiry(token: String): Long? {
+        return try {
+            val parts = token.split(".")
+            if (parts.size < 2) return null
+            val payload = String(
+                Base64.decode(parts[1], Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+            )
+            Regex("\"exp\"\\s*:\\s*(\\d+)")
+                .find(payload)
+                ?.groupValues
+                ?.get(1)
+                ?.toLongOrNull()
+                ?.times(1000L)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun saveUserData(user: UserData) {
@@ -58,10 +78,33 @@ class AuthRepository @Inject constructor(
     }
 
     fun saveFaceTemplates(templates: List<FaceTemplateData>) {
+        val normalized = templates.map { data ->
+            val raw = data.template
+            val encoded = if (!raw.isNullOrBlank() && raw.isHexString()) {
+                Base64.encodeToString(hexToBytes(raw), Base64.NO_WRAP)
+            } else {
+                raw
+            }
+            data.copy(template = encoded)
+        }
         encryptedPrefs.edit()
-            .putString(KEY_FACE_TEMPLATES, gson.toJson(templates))
+            .putString(KEY_FACE_TEMPLATES, gson.toJson(normalized))
             .apply()
     }
+
+    fun decodeFaceTemplate(stored: String): ByteArray {
+        return if (stored.isHexString()) {
+            hexToBytes(stored)
+        } else {
+            Base64.decode(stored, Base64.NO_WRAP)
+        }
+    }
+
+    private fun String.isHexString(): Boolean =
+        length % 2 == 0 && matches(Regex("[0-9a-fA-F]+"))
+
+    private fun hexToBytes(hex: String): ByteArray =
+        hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
 
     fun getFaceTemplates(): List<FaceTemplateData> {
         val json = encryptedPrefs.getString(KEY_FACE_TEMPLATES, null)
@@ -75,6 +118,22 @@ class AuthRepository @Inject constructor(
     fun hasFaceTemplate(surveyorId: String): Boolean {
         return getFaceTemplate(surveyorId)?.template?.isNotBlank() == true
     }
+
+    fun updateFaceTemplateLocal(surveyorId: String, template: ByteArray, version: Int) {
+        val templateBase64 = Base64.encodeToString(template, Base64.NO_WRAP)
+        val templates = getFaceTemplates().toMutableList()
+        val index = templates.indexOfFirst { it.surveyorId == surveyorId }
+        if (index >= 0) {
+            templates[index] = templates[index].copy(template = templateBase64, version = version)
+        } else {
+            templates.add(FaceTemplateData(surveyorId, templateBase64, version))
+        }
+        saveFaceTemplates(templates)
+    }
+
+    fun saveSurveyorId(id: String) = tokenStore.saveSurveyorId(id)
+
+    fun getSurveyorId(): String? = tokenStore.surveyorId()
 
     fun getAccessToken(): String? = tokenStore.accessToken()
 

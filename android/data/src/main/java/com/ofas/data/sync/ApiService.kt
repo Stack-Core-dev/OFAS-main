@@ -54,6 +54,24 @@ interface ApiService {
 
     @GET("api/review/stats")
     suspend fun getReviewStats(@Header("Authorization") authHeader: String): Response<StatsResponse>
+
+    @POST("api/face/enroll")
+    suspend fun enrollFaceTemplate(
+        @Header("Authorization") authHeader: String,
+        @Body request: EnrollFaceTemplateRequest
+    ): Response<EnrollFaceTemplateResponse>
+
+    @GET("api/face/enroll/status")
+    suspend fun getFaceEnrollmentStatus(@Header("Authorization") authHeader: String): Response<FaceEnrollmentStatusResponse>
+
+    @GET("api/auth/me")
+    suspend fun getAccount(@Header("Authorization") authHeader: String): Response<AccountData>
+
+    @POST("api/auth/change-password")
+    suspend fun changePassword(
+        @Header("Authorization") authHeader: String,
+        @Body request: ChangePasswordRequest
+    ): Response<ChangePasswordResponse>
 }
 
 data class SyncFieldsResponse(
@@ -85,7 +103,7 @@ data class SyncFieldData(
 }
 
 data class FaceTemplateData(
-    val surveyorId: String,
+    @Json(name = "surveyor_id") val surveyorId: String,
     val template: String?,
     val version: Int
 )
@@ -211,4 +229,41 @@ data class PaginationData(
     val page: Int,
     val perPage: Int,
     val total: Int
+)
+
+data class EnrollFaceTemplateRequest(
+    @Json(name = "template") val template: String,
+    @Json(name = "version") val version: Int = 1
+)
+
+data class EnrollFaceTemplateResponse(
+    val message: String,
+    @Json(name = "surveyor_id") val surveyorId: String,
+    val version: Int
+)
+
+data class FaceEnrollmentStatusResponse(
+    @Json(name = "surveyor_id") val surveyorId: String,
+    @Json(name = "employee_id") val employeeId: String,
+    @Json(name = "full_name") val fullName: String,
+    @Json(name = "has_template") val hasTemplate: Boolean,
+    val version: Int,
+    @Json(name = "updated_at") val updatedAt: String?
+)
+
+data class AccountData(
+    val id: String,
+    val username: String,
+    val email: String,
+    val role: String,
+    @Json(name = "totp_enabled") val totpEnabled: Boolean = false
+)
+
+data class ChangePasswordRequest(
+    @Json(name = "current_password") val currentPassword: String,
+    @Json(name = "new_password") val newPassword: String
+)
+
+data class ChangePasswordResponse(
+    val message: String
 )

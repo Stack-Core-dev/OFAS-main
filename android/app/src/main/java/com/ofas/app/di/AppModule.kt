@@ -1,9 +1,9 @@
 package com.ofas.app.di
 
 import android.content.Context
-import androidx.room.Room
 import com.ofas.data.database.OFASDatabase
 import com.ofas.data.repository.FieldRepository
+import com.ofas.data.repository.FaceTemplateRepository
 import com.ofas.data.repository.SurveyorRepository
 import com.ofas.data.repository.VisitRepository
 import com.ofas.data.sync.ApiService
@@ -31,11 +31,7 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@dagger.hilt.android.qualifiers.ApplicationContext context: Context): OFASDatabase {
-        return Room.databaseBuilder(
-            context,
-            OFASDatabase::class.java,
-            "ofas.db"
-        ).build()
+        return OFASDatabase.getInstance(context)
     }
 
     @Provides
@@ -48,6 +44,12 @@ object AppModule {
     @Singleton
     fun provideSurveyorRepository(database: OFASDatabase): SurveyorRepository {
         return SurveyorRepository(database.surveyorDao())
+    }
+
+    @Provides
+    @Singleton
+    fun provideFaceTemplateRepository(database: OFASDatabase): FaceTemplateRepository {
+        return FaceTemplateRepository(database.surveyorDao())
     }
 
     @Provides

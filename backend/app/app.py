@@ -91,9 +91,12 @@ def create_app(config_name: str = None) -> Flask:
     register_commands(app)
 
     # Apply rate limits to specific endpoints
-    limiter.limit("10 per minute")(app.view_functions.get('auth.login', lambda: None))
+    login_view = app.view_functions.get('login')
+    if login_view is not None:
+        limiter.limit("10 per minute")(login_view)
     limiter.limit("30 per minute")(app.view_functions.get('sync.submit_visit', lambda: None))
     limiter.limit("60 per minute")(app.view_functions.get('upload.upload_photo', lambda: None))
+    limiter.limit("10 per minute")(app.view_functions.get('change_password', lambda: None))
 
     @app.route('/health')
     def health_check():
@@ -176,18 +179,56 @@ def create_app(config_name: str = None) -> Flask:
 
     @app.route('/api/auth/login', methods=['POST'])
     def login():
-        from .auth import verify_password, create_tokens, generate_challenge
-        from .models import User
+        from .auth import verify_password, create_tokens, generate_challenge, hash_password
+        from .models import User, UserRole, Surveyor
 
         data = request.get_json()
         if not data or not all(k in data for k in ('username', 'password')):
             return jsonify({'error': 'Username and password required'}), 400
 
+        username = str(data['username']).strip()
         db = next(get_db())
-        user = db.query(User).filter(User.username == data['username'], User.is_active == True).first()
 
-        if not user or not verify_password(data['password'], user.password_hash):
-            return jsonify({'error': 'Invalid credentials'}), 401
+        # First try to find a User with the username
+        user = db.query(User).filter(User.username == username, User.is_active == True).first()
+
+        # If not found, check if it's a surveyor employee_id
+        if not user:
+            surveyor = db.query(Surveyor).filter(
+                Surveyor.employee_id == username,
+                Surveyor.is_active == True
+            ).first()
+            
+            if surveyor:
+                # Check if a user account exists for this surveyor
+                user = db.query(User).filter(
+                    User.username == surveyor.employee_id,
+                    User.is_active == True
+                ).first()
+                
+                if not user:
+                    # Create a user account for the surveyor
+                    user = User(
+                        username=surveyor.employee_id,
+                        email=surveyor.email or f"{surveyor.employee_id}@ofas.local",
+                        password_hash=hash_password(data['password']),  # Use provided password
+                        role=UserRole.SURVEYOR
+                    )
+                    db.add(user)
+                    db.commit()
+                    # Verify password again
+                    if not verify_password(data['password'], user.password_hash):
+                        return jsonify({'error': 'Invalid credentials'}), 401
+                else:
+                    # Verify password
+                    if not verify_password(data['password'], user.password_hash):
+                        return jsonify({'error': 'Invalid credentials'}), 401
+            else:
+                return jsonify({'error': 'Invalid credentials'}), 401
+        else:
+            # Regular user login
+            if not verify_password(data['password'], user.password_hash):
+                return jsonify({'error': 'Invalid credentials'}), 401
 
         if user.totp_enabled:
             totp_token = data.get('totp_token')
@@ -258,6 +299,62 @@ def create_app(config_name: str = None) -> Flask:
             'role': user.role.value,
             'totp_enabled': user.totp_enabled
         })
+
+    @app.route('/api/auth/change-password', methods=['POST'])
+    @jwt_required()
+    def change_password():
+        from .auth import verify_password, hash_password, get_jwt_identity
+        from .models import User
+        from .audit import create_audit_logger
+
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request body required'}), 400
+
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        if not current_password or not new_password:
+            return jsonify({'error': 'Current and new password are required'}), 400
+        if len(new_password) < 8:
+            return jsonify({'error': 'New password must be at least 8 characters'}), 400
+        if new_password == current_password:
+            return jsonify({'error': 'New password must be different from the current password'}), 400
+
+        db = next(get_db())
+        audit = create_audit_logger(db)
+        user_id = get_jwt_identity()
+        user = db.query(User).filter(
+            User.id == user_id,
+            User.is_active == True
+        ).first()
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if not verify_password(current_password, user.password_hash):
+            return jsonify({'error': 'Current password is incorrect'}), 401
+
+        user.password_hash = hash_password(new_password)
+        user.updated_at = datetime.utcnow()
+        db.commit()
+
+        try:
+            audit.log(
+                action='PASSWORD_CHANGED',
+                entity_type='user',
+                entity_id=str(user.id),
+                user_id=user_id,
+                old_values=None,
+                new_values={'username': user.username},
+                ip_address=request.remote_addr,
+                user_agent=request.user_agent.string
+            )
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logging.exception("Audit log failed for password change")
+
+        return jsonify({'message': 'Password changed successfully'})
 
     @app.errorhandler(HTTPException)
     def handle_http_exception(e):

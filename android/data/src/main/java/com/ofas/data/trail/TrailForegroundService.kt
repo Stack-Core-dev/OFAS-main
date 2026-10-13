@@ -38,7 +38,13 @@ class TrailForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification())
+        try {
+            startForeground(NOTIFICATION_ID, createNotification())
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to start foreground service (missing permission?)", e)
+            stopSelf()
+            return
+        }
 
         val database = OFASDatabase.getInstance(this)
         val keyManager = KeyManager.getInstance(this)
@@ -52,7 +58,9 @@ class TrailForegroundService : Service() {
     }
 
     override fun onDestroy() {
-        trailManager.stopRecording()
+        if (::trailManager.isInitialized) {
+            trailManager.stopRecording()
+        }
         Log.d(TAG, "Trail recording stopped")
         super.onDestroy()
     }

@@ -54,7 +54,8 @@ class SyncWorker(
     private val gson = Gson()
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val token = AuthTokenStore(applicationContext).accessToken()
+        val tokenStore = AuthTokenStore(applicationContext)
+        var token = tokenStore.accessToken()
             ?: return@withContext Result.success()
         val database = OFASDatabase.getInstance(applicationContext)
         val repository = VisitRepository(database.visitDao())
@@ -68,12 +69,18 @@ class SyncWorker(
         for (visit in repository.getPendingSync()) {
             if (repository.markSyncing(visit.id) == 0) continue
             try {
-                val response = api.submitVisit("Bearer $token", visit.toRequest(gson))
+                var response = api.submitVisit("Bearer $token", visit.toRequest(gson))
+                if (response.code() == 401) {
+                    refreshSession(tokenStore, api)?.let { refreshed ->
+                        token = refreshed
+                        response = api.submitVisit("Bearer $token", visit.toRequest(gson))
+                    }
+                }
                 if (response.isSuccessful && response.body()?.success == true) {
                     repository.markSynced(visit.id, System.currentTimeMillis())
                 } else {
                     repository.markFailed(visit.id)
-                    retry = response.code() >= 500 || response.code() == 429
+                    retry = response.code() >= 500 || response.code() == 429 || response.code() == 401
                     Log.w(TAG, "Visit ${visit.visitId} rejected with HTTP ${response.code()}")
                 }
             } catch (error: Exception) {
@@ -83,6 +90,22 @@ class SyncWorker(
             }
         }
         if (retry) Result.retry() else Result.success()
+    }
+
+    private suspend fun refreshSession(tokenStore: AuthTokenStore, api: ApiService): String? {
+        val refresh = tokenStore.refreshToken() ?: return null
+        return try {
+            val response = api.refreshToken("Bearer $refresh")
+            val body = response.body()
+            if (response.isSuccessful && body != null) {
+                tokenStore.saveSession(body.accessToken, body.refreshToken)
+                body.accessToken
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 }
 

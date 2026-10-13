@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from .models import Surveyor
 from .database import get_db
-from .auth import require_admin, get_current_user_id
+from .auth import require_admin, require_surveyor, get_current_user_id
 from .validation import validate_face_template
 from .audit import create_audit_logger
 
@@ -150,3 +150,111 @@ def delete_face_template(surveyor_id):
     db.commit()
 
     return jsonify({'message': 'Face template deleted'})
+
+
+@face_bp.route('/enroll', methods=['POST'])
+@require_surveyor
+def enroll_face_template():
+    """
+    Self-enroll face template for the authenticated surveyor.
+    Expected JSON:
+    {
+        "template": "base64 encoded face template bytes",
+        "version": 1
+    }
+    """
+    db = next(get_db())
+    audit = create_audit_logger(db)
+
+    user_id = get_current_user_id()
+    surveyor = db.query(Surveyor).filter(
+        Surveyor.is_active == True,
+        (Surveyor.email == user_id) | (Surveyor.id == user_id)
+    ).first()
+    
+    if not surveyor:
+        # Try to find by user relationship
+        from .models import User
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            surveyor = db.query(Surveyor).filter(
+                Surveyor.is_active == True,
+                (Surveyor.email == user.email) | (Surveyor.employee_id == user.username)
+            ).first()
+    
+    if not surveyor:
+        return jsonify({'error': 'Surveyor profile not found'}), 404
+
+    payload = request.get_json()
+    if not payload or 'template' not in payload:
+        return jsonify({'error': 'Missing template data'}), 400
+
+    # Validate template
+    import base64
+    try:
+        template_bytes = base64.b64decode(payload['template'])
+    except Exception:
+        return jsonify({'error': 'Invalid base64 template'}), 400
+
+    is_valid, errors = validate_face_template(template_bytes)
+    if not is_valid:
+        return jsonify({'error': 'Invalid face template', 'details': errors}), 400
+
+    # Store template
+    old_version = surveyor.face_template_version
+    surveyor.face_template = template_bytes
+    surveyor.face_template_version = payload.get('version', surveyor.face_template_version + 1)
+    surveyor.updated_at = datetime.utcnow()
+
+    db.commit()
+
+    audit.log(
+        action='FACE_TEMPLATE_ENROLLED',
+        entity_type='surveyor',
+        entity_id=str(surveyor.id),
+        user_id=user_id,
+        old_values={'version': old_version},
+        new_values={'version': surveyor.face_template_version},
+        ip_address=request.remote_addr,
+        user_agent=request.user_agent.string
+    )
+
+    return jsonify({
+        'message': 'Face template enrolled successfully',
+        'surveyor_id': str(surveyor.id),
+        'version': surveyor.face_template_version
+    })
+
+
+@face_bp.route('/enroll/status', methods=['GET'])
+@require_surveyor
+def get_enrollment_status():
+    """Get face enrollment status for the authenticated surveyor."""
+    db = next(get_db())
+    user_id = get_current_user_id()
+    
+    surveyor = db.query(Surveyor).filter(
+        Surveyor.is_active == True,
+        (Surveyor.email == user_id) | (Surveyor.id == user_id)
+    ).first()
+    
+    if not surveyor:
+        from .models import User
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            surveyor = db.query(Surveyor).filter(
+                Surveyor.is_active == True,
+                (Surveyor.email == user.email) | (Surveyor.employee_id == user.username)
+            ).first()
+    
+    if not surveyor:
+        return jsonify({'error': 'Surveyor profile not found'}), 404
+
+    return jsonify({
+        'surveyor_id': str(surveyor.id),
+        'employee_id': surveyor.employee_id,
+        'full_name': surveyor.full_name,
+        'has_template': surveyor.face_template is not None,
+        'version': surveyor.face_template_version,
+        'updated_at': surveyor.updated_at.isoformat() + 'Z' if surveyor.updated_at else None
+    })

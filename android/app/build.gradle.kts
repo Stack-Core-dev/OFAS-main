@@ -26,7 +26,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             isMinifyEnabled = false
@@ -89,7 +88,6 @@ dependencies {
     implementation("androidx.camera:camera-mlkit-vision:1.4.0-beta02")
 
     implementation("com.google.android.gms:play-services-location:21.2.0")
-    implementation("com.google.android.play:integrity:1.6.0")
     implementation("androidx.work:work-runtime-ktx:2.9.0")
 
     implementation("org.tensorflow:tensorflow-lite:2.14.0")

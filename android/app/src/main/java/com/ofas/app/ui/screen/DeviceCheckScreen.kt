@@ -55,20 +55,18 @@ import kotlinx.coroutines.launch
 fun DeviceCheckScreen(onContinue: () -> Unit) {
     var checkItems by remember { mutableStateOf<List<DeviceIntegrityManager.DeviceCheckItem>>(emptyList()) }
     var isChecking by remember { mutableStateOf(true) }
-    var progress by remember { mutableStateOf(0f) }
-    var integrityManager by remember { mutableStateOf<DeviceIntegrityManager?>(null) }
-
-    LaunchedEffect(Unit) {
-        val context = LocalContext.current
-        integrityManager = DeviceIntegrityManager.getInstance(context)
-        startIntegrityCheck()
-    }
+    val context = LocalContext.current
+    val manager = remember { DeviceIntegrityManager.getInstance(context) }
 
     fun startIntegrityCheck() {
-        integrityManager?.performIntegrityCheckAsync { result ->
-            checkItems = integrityManager?.getCheckItems(result) ?: emptyList()
+        manager.performIntegrityCheckAsync { result ->
+            checkItems = manager.getCheckItems(result)
             isChecking = false
         }
+    }
+
+    LaunchedEffect(Unit) {
+        startIntegrityCheck()
     }
 
     Column(
@@ -208,6 +206,3 @@ private fun CheckItemCard(check: DeviceIntegrityManager.DeviceCheckItem) {
         }
     }
 }
-
-// Need to import LocalContext
-import androidx.compose.ui.platform.LocalContext

@@ -57,6 +57,9 @@ fun AuthScreen(
                 onVerified = {
                     authViewModel.completeFaceAuth()
                 },
+                onReEnroll = {
+                    currentScreen = AuthScreenType.FaceEnrollment
+                },
                 onCancel = {
                     currentScreen = AuthScreenType.Login
                     authViewModel.logout()

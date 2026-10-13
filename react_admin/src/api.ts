@@ -76,6 +76,9 @@ export type Surveyor = {
   email: string | null;
   is_active: boolean;
   created_at: string;
+  face_registration_status?: "registered" | "not_registered";
+  face_template_version?: number;
+  face_template_updated_at?: string | null;
 };
 
 export type Field = {
@@ -113,7 +116,7 @@ export type Assignment = {
   completed_at: string | null;
 };
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:5000").replace(/\/$/, "");
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
 let session: AuthSession | null = loadSession();
 
@@ -183,6 +186,11 @@ export async function login(username: string, password: string, totpToken?: stri
 
 export const api = {
   metrics: () => request<Metrics>("/health/metrics"),
+  faceRegistrationStats: () => request<{
+    summary: { total_surveyors: number; face_registered: number; face_not_registered: number; registration_rate: number };
+    registered: Array<{ id: string; employee_id: string; full_name: string; face_template_version: number; updated_at: string }>;
+    not_registered: Array<{ id: string; employee_id: string; full_name: string }>;
+  }>("/api/admin/surveyors/face-registration-stats"),
   visits: (params: { per_page?: number; status?: string; surveyor_id?: string } = {}) => {
     const query = new URLSearchParams({ per_page: String(params.per_page ?? 100) });
     if (params.status) query.set("status", params.status);

@@ -2,16 +2,17 @@ package com.ofas.data.face
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.util.Log
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetector
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import com.ofas.security.keystore.KeyManager
-import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
-import org.tensorflow.lite.support.image.TensorImage
-import org.tensorflow.lite.support.tensorbuffer.TensorBuffer
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
 
 class FaceVerifier private constructor(
     private val context: Context,
@@ -22,8 +23,13 @@ class FaceVerifier private constructor(
         private const val TAG = "FaceVerifier"
         private const val MODEL_PATH = "face_embedding.tflite"
         private const val INPUT_SIZE = 112
-        private const val EMBEDDING_SIZE = 512
-        private const val MATCH_THRESHOLD = 0.6f
+        private const val EMBEDDING_SIZE = 192
+
+        // MobileFaceNet embeddings are compared by Euclidean distance (lower = closer).
+        // A genuine match on a well-cropped face is typically well under this value,
+        // while two different people stay above it.
+        const val MATCH_THRESHOLD = 0.8f
+
         private var INSTANCE: FaceVerifier? = null
 
         fun getInstance(context: Context, keyManager: KeyManager): FaceVerifier {
@@ -42,11 +48,21 @@ class FaceVerifier private constructor(
 
     private val interpreter: Interpreter by lazy {
         val modelFile = copyModelToFile()
-        Interpreter(modelFile)
+        Interpreter(modelFile, Interpreter.Options().setNumThreads(2))
     }
 
-    private fun copyModelToFile(): java.io.File {
-        val file = java.io.File(context.cacheDir, MODEL_PATH)
+    private val faceDetector: FaceDetector by lazy {
+        val options = FaceDetectorOptions.Builder()
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_NONE)
+            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+            .setMinFaceSize(0.15f)
+            .build()
+        FaceDetection.getClient(options)
+    }
+
+    private fun copyModelToFile(): File {
+        val file = File(context.cacheDir, MODEL_PATH)
         if (!file.exists()) {
             context.assets.open(MODEL_PATH).use { input ->
                 file.outputStream().use { output ->
@@ -57,46 +73,84 @@ class FaceVerifier private constructor(
         return file
     }
 
+    /**
+     * Detects the largest face in [bitmap], crops it and returns a 192-float
+     * embedding. Returns null when no face is detected so callers can retry
+     * instead of comparing a meaningless embedding.
+     */
     fun extractEmbedding(bitmap: Bitmap): ByteArray? {
-        val resized = resizeBitmap(bitmap, INPUT_SIZE, INPUT_SIZE)
-        val tensorImage = TensorImage.fromBitmap(resized)
-        val inputBuffer = TensorBuffer.createFixedSize(intArrayOf(1, INPUT_SIZE, INPUT_SIZE, 3), DataType.FLOAT32)
-        inputBuffer.loadBuffer(tensorImage.buffer)
+        val faceBitmap = cropLargestFace(bitmap) ?: return null
+        val prepared = Bitmap.createScaledBitmap(faceBitmap, INPUT_SIZE, INPUT_SIZE, true)
 
-        val outputBuffer = TensorBuffer.createFixedSize(intArrayOf(1, EMBEDDING_SIZE), DataType.FLOAT32)
-        interpreter.run(inputBuffer.buffer, outputBuffer.buffer)
+        val input = ByteBuffer
+            .allocateDirect(1 * INPUT_SIZE * INPUT_SIZE * 3 * 4)
+            .order(ByteOrder.nativeOrder())
 
-        val embedding = FloatBuffer.wrap(outputBuffer.floatArray)
-        val byteBuffer = ByteBuffer.allocate(EMBEDDING_SIZE * 4).order(ByteOrder.nativeOrder())
-        byteBuffer.asFloatBuffer().put(embedding)
-        return byteBuffer.array()
+        val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
+        prepared.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
+        for (pixel in pixels) {
+            input.putFloat(((pixel shr 16 and 0xFF) - 128) / 128f)
+            input.putFloat(((pixel shr 8 and 0xFF) - 128) / 128f)
+            input.putFloat(((pixel and 0xFF) - 128) / 128f)
+        }
+        input.rewind()
+
+        val output = ByteBuffer
+            .allocateDirect(1 * EMBEDDING_SIZE * 4)
+            .order(ByteOrder.nativeOrder())
+
+        interpreter.run(input, output)
+
+        output.rewind()
+        val embedding = ByteArray(EMBEDDING_SIZE * 4)
+        output.get(embedding)
+        return embedding
+    }
+
+    private fun cropLargestFace(bitmap: Bitmap): Bitmap? {
+        val faces = try {
+            Tasks.await(faceDetector.process(InputImage.fromBitmap(bitmap, 0)))
+        } catch (e: Exception) {
+            Log.w(TAG, "Face detection failed", e)
+            return null
+        }
+
+        val face = faces.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+            ?: run {
+                Log.d(TAG, "No face detected")
+                return null
+            }
+
+        val box = face.boundingBox
+        val pad = (box.width() * 0.25f).toInt().coerceAtLeast(8)
+        val left = (box.left - pad).coerceAtLeast(0)
+        val top = (box.top - pad).coerceAtLeast(0)
+        val right = (box.right + pad).coerceAtMost(bitmap.width)
+        val bottom = (box.bottom + pad).coerceAtMost(bitmap.height)
+
+        val width = right - left
+        val height = bottom - top
+        if (width <= 0 || height <= 0) return null
+
+        return Bitmap.createBitmap(bitmap, left, top, width, height)
     }
 
     fun compareEmbeddings(embedding1: ByteArray, embedding2: ByteArray): Float {
         val float1 = ByteBuffer.wrap(embedding1).order(ByteOrder.nativeOrder()).asFloatBuffer()
         val float2 = ByteBuffer.wrap(embedding2).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
-        var dotProduct = 0f
-        var norm1 = 0f
-        var norm2 = 0f
-
+        var sum = 0.0
         for (i in 0 until EMBEDDING_SIZE) {
-            val v1 = float1.get(i)
-            val v2 = float2.get(i)
-            dotProduct += v1 * v2
-            norm1 += v1 * v1
-            norm2 += v2 * v2
+            val diff = float1.get(i) - float2.get(i)
+            sum += diff.toDouble() * diff.toDouble()
         }
-
-        return if (norm1 > 0 && norm2 > 0) {
-            dotProduct / (Math.sqrt(norm1.toDouble()) * Math.sqrt(norm2.toDouble())).toFloat()
-        } else 0f
+        return Math.sqrt(sum).toFloat()
     }
 
     fun verifyFace(liveEmbedding: ByteArray, storedEmbedding: ByteArray): Boolean {
-        val similarity = compareEmbeddings(liveEmbedding, storedEmbedding)
-        Log.d(TAG, "Face similarity: $similarity (threshold: $MATCH_THRESHOLD)")
-        return similarity >= MATCH_THRESHOLD
+        val distance = compareEmbeddings(liveEmbedding, storedEmbedding)
+        Log.d(TAG, "Face distance: $distance (threshold: $MATCH_THRESHOLD)")
+        return distance <= MATCH_THRESHOLD
     }
 
     fun detectBlink(bitmap: Bitmap): Boolean {
@@ -105,15 +159,8 @@ class FaceVerifier private constructor(
         return false
     }
 
-    private fun resizeBitmap(bitmap: Bitmap, width: Int, height: Int): Bitmap {
-        val matrix = Matrix()
-        val scaleX = width / bitmap.width.toFloat()
-        val scaleY = height / bitmap.height.toFloat()
-        matrix.postScale(scaleX, scaleY)
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-    }
-
     fun close() {
         interpreter.close()
+        faceDetector.close()
     }
 }

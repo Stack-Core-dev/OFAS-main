@@ -34,9 +34,26 @@ class DeviceInfo(private val context: Context) {
         get() = checkMockLocation()
 
     private fun checkRoot(): Boolean {
-        val suPaths = arrayOf("/system/bin/su", "/system/xbin/su", "/sbin/su", "/system/su", "/system/bin/.ext/.su")
-        return suPaths.any { java.io.File(it).exists() } ||
-                java.lang.Runtime.getRuntime().exec("which su").inputStream.read() != -1
+        val suPaths = arrayOf(
+            "/system/bin/su",
+            "/system/xbin/su",
+            "/sbin/su",
+            "/system/su",
+            "/system/bin/.ext/.su",
+            "/system/app/Superuser.apk",
+            "/data/local/xbin/su",
+            "/data/local/bin/su"
+        )
+        if (suPaths.any { java.io.File(it).exists() }) return true
+        if (Build.TAGS?.contains("test-keys") == true) return true
+        return try {
+            val process = java.lang.Runtime.getRuntime().exec(arrayOf("which", "su"))
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+            output.trim().isNotEmpty()
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun checkMockLocation(): Boolean {

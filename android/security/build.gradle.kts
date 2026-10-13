@@ -29,7 +29,5 @@ dependencies {
     implementation("androidx.credentials:credentials:1.3.0-alpha01")
     implementation("androidx.biometric:biometric:1.2.0-alpha04")
     implementation("org.bouncycastle:bcprov-jdk18on:1.76")
-    implementation("com.google.android.play:integrity:1.6.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-    implementation("com.google.android.gms:play-services-tasks:18.0.2")
 }

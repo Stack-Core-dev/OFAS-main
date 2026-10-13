@@ -47,6 +47,7 @@ abstract class OFASDatabase : RoomDatabase() {
         fun getInstance(context: Context): OFASDatabase {
             return INSTANCE ?: synchronized(this) {
                 net.sqlcipher.database.SQLiteDatabase.loadLibs(context)
+                removeLegacyPlaintextDatabase(context)
                 val passphrase = getOrCreatePassphrase(context)
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
@@ -57,6 +58,23 @@ abstract class OFASDatabase : RoomDatabase() {
                     .addMigrations(MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
+            }
+        }
+
+        private fun removeLegacyPlaintextDatabase(context: Context) {
+            val dbFile = context.getDatabasePath("ofas.db")
+            if (!dbFile.exists()) return
+            val header = ByteArray(16)
+            val bytesRead = try {
+                dbFile.inputStream().use { it.read(header) }
+            } catch (_: Exception) {
+                return
+            }
+            val magic = "SQLite format 3\u0000".toByteArray(Charsets.US_ASCII)
+            if (bytesRead == magic.size && header.contentEquals(magic)) {
+                dbFile.delete()
+                java.io.File(dbFile.path + "-wal").delete()
+                java.io.File(dbFile.path + "-shm").delete()
             }
         }
 

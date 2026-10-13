@@ -203,10 +203,15 @@ def list_surveyors():
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     active_only = request.args.get('active', 'true').lower() == 'true'
+    face_status = request.args.get('face_status')  # registered, not_registered
     
     query = db.query(Surveyor)
     if active_only:
         query = query.filter(Surveyor.is_active == True)
+    if face_status == 'registered':
+        query = query.filter(Surveyor.face_template.isnot(None))
+    elif face_status == 'not_registered':
+        query = query.filter(Surveyor.face_template.is_(None))
     
     total = query.count()
     surveyors = query.order_by(Surveyor.created_at.desc()).offset((page-1)*per_page).limit(per_page).all()
@@ -218,8 +223,9 @@ def list_surveyors():
             'full_name': s.full_name,
             'phone_number': s.phone_number,
             'email': s.email,
-            'has_face_template': s.face_template is not None,
+            'face_registration_status': 'registered' if s.face_template is not None else 'not_registered',
             'face_template_version': s.face_template_version,
+            'face_template_updated_at': s.updated_at.isoformat() + 'Z' if s.face_template and s.updated_at else None,
             'is_active': s.is_active,
             'created_at': s.created_at.isoformat() + 'Z'
         } for s in surveyors],
@@ -360,6 +366,53 @@ def delete_surveyor(surveyor_id):
         user.is_active = False
     db.commit()
     return jsonify({'message': 'Surveyor deactivated'})
+
+
+@admin_bp.route('/surveyors/face-registration-stats', methods=['GET'])
+@require_admin
+def get_face_registration_stats():
+    """Get face registration statistics for all surveyors."""
+    db = next(get_db())
+    
+    total = db.query(Surveyor).filter(Surveyor.is_active == True).count()
+    registered = db.query(Surveyor).filter(
+        Surveyor.is_active == True,
+        Surveyor.face_template.isnot(None)
+    ).count()
+    not_registered = total - registered
+    
+    # Get details for each status
+    registered_surveyors = db.query(Surveyor.id, Surveyor.employee_id, Surveyor.full_name, 
+                                     Surveyor.face_template_version, Surveyor.updated_at).filter(
+        Surveyor.is_active == True,
+        Surveyor.face_template.isnot(None)
+    ).all()
+    
+    not_registered_surveyors = db.query(Surveyor.id, Surveyor.employee_id, Surveyor.full_name).filter(
+        Surveyor.is_active == True,
+        Surveyor.face_template.is_(None)
+    ).all()
+    
+    return jsonify({
+        'summary': {
+            'total_surveyors': total,
+            'face_registered': registered,
+            'face_not_registered': not_registered,
+            'registration_rate': round((registered / total * 100) if total > 0 else 0, 2)
+        },
+        'registered': [{
+            'id': str(s.id),
+            'employee_id': s.employee_id,
+            'full_name': s.full_name,
+            'face_template_version': s.face_template_version,
+            'updated_at': s.updated_at.isoformat() + 'Z' if s.updated_at else None
+        } for s in registered_surveyors],
+        'not_registered': [{
+            'id': str(s.id),
+            'employee_id': s.employee_id,
+            'full_name': s.full_name
+        } for s in not_registered_surveyors]
+    })
 
 
 @admin_bp.route('/fields', methods=['GET'])

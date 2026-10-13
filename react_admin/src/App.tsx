@@ -395,6 +395,17 @@ function Surveyors({ surveyors, onChanged }: { surveyors: Surveyor[]; onChanged:
     }
   }
 
+  interface FaceStatusBadgeProps {
+  status: "registered" | "not_registered" | undefined;
+}
+
+function FaceStatusBadge({ status }: FaceStatusBadgeProps) {
+  if (status === "registered") {
+    return <span className="status-badge registered">✓ Registered</span>;
+  }
+  return <span className="status-badge not-registered">✗ Not Registered</span>;
+}
+
   return <div className="page"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">FIELD OPERATIONS</p><h3>Surveyors</h3><p className="muted">Edit or activate/deactivate surveyor accounts.</p></div></div>
     {editing && <form className="create-form edit-form" onSubmit={save}>
       <div className="form-heading"><div><h3>Edit surveyor</h3><p className="muted">Update profile details or set a new password.</p></div><button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button></div>
@@ -406,8 +417,13 @@ function Surveyors({ surveyors, onChanged }: { surveyors: Surveyor[]; onChanged:
       {error && <div className="error">{error}</div>}
       <button className="primary" disabled={busy}>{busy ? "Saving..." : "Save surveyor"}</button>
     </form>}
-    <DataTable title="" headers={["Employee ID", "Name", "Phone", "Email", "Status", "Actions"]} rows={surveyors.map((surveyor) => [
-      surveyor.employee_id, surveyor.full_name, surveyor.phone_number ?? "—", surveyor.email ?? "—", surveyor.is_active ? "Active" : "Inactive",
+    <DataTable title="" headers={["Employee ID", "Name", "Phone", "Email", "Face Registration", "Status", "Actions"]} rows={surveyors.map((surveyor) => [
+      surveyor.employee_id,
+      surveyor.full_name,
+      surveyor.phone_number ?? "—",
+      surveyor.email ?? "—",
+      <FaceStatusBadge status={surveyor.face_registration_status} />,
+      surveyor.is_active ? "Active" : "Inactive",
       <Actions key={surveyor.id} onEdit={() => beginEdit(surveyor)} onToggle={() => toggle(surveyor)} active={surveyor.is_active} />
     ])} />
   </section></div>;
@@ -617,12 +633,32 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
 
 function Overview({ metrics, visits, onNavigate }: { metrics: Metrics | null; visits: Visit[]; onNavigate: (section: Section) => void }) {
   const counts = metrics?.counts;
+  const [faceStats, setFaceStats] = useState<{
+    summary: {
+      total_surveyors: number;
+      face_registered: number;
+      face_not_registered: number;
+      registration_rate: number;
+    };
+  } | null>(null);
+
+  useEffect(() => {
+    api.faceRegistrationStats().then(setFaceStats).catch(() => {});
+  }, []);
+
   return <div className="page">
     <div className="stat-grid">
       <Stat label="Total visits" value={counts?.visits ?? "—"} accent="green" />
       <Stat label="Active surveyors" value={counts?.surveyors ?? "—"} accent="blue" />
       <Stat label="Registered fields" value={counts?.fields ?? "—"} accent="gold" />
       <Stat label="Registered phones" value={counts?.phones ?? "—"} accent="purple" />
+      {faceStats?.summary && (
+        <div>
+          <Stat label="Face Registered" value={faceStats.summary.face_registered} accent="green" />
+          <Stat label="Face Not Registered" value={faceStats.summary.face_not_registered} accent="red" />
+          <Stat label="Registration Rate" value={`${faceStats.summary.registration_rate}%`} accent="blue" />
+        </div>
+      )}
     </div>
     <section className="panel"><div className="panel-heading"><div><p className="eyebrow">AUDIT QUEUE</p><h3>Recent field visits</h3></div><button className="link-button" onClick={() => onNavigate("visits")}>View all →</button></div>
       <DataTable compact title="" headers={["Visit", "Surveyor", "Field", "Captured", "Review"]} rows={visits.slice(0, 5).map((visit) => [visit.visit_id, visit.surveyor_name ?? "—", visit.field_code ?? "—", new Date(visit.satellite_timestamp).toLocaleDateString(), visit.review_status ?? "pending"])} />

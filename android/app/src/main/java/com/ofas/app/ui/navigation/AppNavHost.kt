@@ -1,6 +1,7 @@
 package com.ofas.app.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -11,13 +12,16 @@ import com.ofas.app.ui.screen.FieldSelectionScreen
 import com.ofas.app.ui.screen.HomeScreen
 import com.ofas.app.ui.screen.PhotoCaptureScreen
 import com.ofas.app.ui.screen.ReviewScreen
+import com.ofas.app.ui.screen.SettingsScreen
 import com.ofas.app.ui.screen.SuccessScreen
 import com.ofas.app.ui.screen.auth.AuthScreen
 import com.ofas.app.ui.screen.FaceVerificationScreen
 import com.ofas.app.ui.screen.auth.FaceEnrollmentScreen
+import com.ofas.data.trail.TrailForegroundService
 
 @Composable
 fun AppNavHost(navController: NavHostController) {
+    val context = LocalContext.current
     NavHost(
         navController = navController,
         startDestination = NavRoutes.AUTH
@@ -32,7 +36,14 @@ fun AppNavHost(navController: NavHostController) {
                     navController.navigate(NavRoutes.DEVICE_CHECK)
                 },
                 onSync = {},
-                onSettings = {}
+                onSettings = {
+                    navController.navigate(NavRoutes.SETTINGS)
+                },
+                onLoggedOut = {
+                    navController.navigate(NavRoutes.AUTH) {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                    }
+                }
             )
         }
 
@@ -47,6 +58,7 @@ fun AppNavHost(navController: NavHostController) {
         composable(NavRoutes.FIELD_SELECTION) {
             FieldSelectionScreen(
                 onFieldSelected = { field, surveyorId ->
+                    TrailForegroundService.start(context)
                     navController.navigate(NavRoutes.faceVerification(surveyorId, field.id))
                 }
             )
@@ -61,6 +73,17 @@ fun AppNavHost(navController: NavHostController) {
                 },
                 onCancel = {
                     navController.popBackStack()
+                }
+            )
+        }
+
+        composable(NavRoutes.SETTINGS) {
+            SettingsScreen(
+                onBack = {
+                    navController.popBackStack()
+                },
+                onReEnrollFace = {
+                    navController.navigate(NavRoutes.FACE_ENROLLMENT)
                 }
             )
         }
@@ -112,11 +135,13 @@ fun AppNavHost(navController: NavHostController) {
         ) {
             ReviewScreen(
                 onSubmit = {
+                    TrailForegroundService.stop(context)
                     navController.navigate(NavRoutes.SUCCESS) {
                         popUpTo(NavRoutes.HOME)
                     }
                 },
                 onCancel = {
+                    TrailForegroundService.stop(context)
                     navController.popBackStack()
                 }
             )
@@ -125,6 +150,7 @@ fun AppNavHost(navController: NavHostController) {
         composable(NavRoutes.SUCCESS) {
             SuccessScreen(
                 onDone = {
+                    TrailForegroundService.stop(context)
                     navController.navigate(NavRoutes.HOME) {
                         popUpTo(NavRoutes.HOME) { inclusive = true }
                     }

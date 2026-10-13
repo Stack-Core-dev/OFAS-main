@@ -32,7 +32,8 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.OFAS"
         tools:targetApi="31">
 
@@ -49,15 +50,15 @@
         </activity>
 
         <service
-            android:name=".trail.TrailForegroundService"
+            android:name="com.ofas.data.trail.TrailForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="location|camera" />
+            android:foregroundServiceType="location" />
 
         <receiver
-            android:name=".sync.SyncBootReceiver"
+            android:name="com.ofas.data.sync.SyncBootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>

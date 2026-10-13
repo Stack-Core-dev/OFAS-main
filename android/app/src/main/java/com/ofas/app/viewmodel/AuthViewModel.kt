@@ -47,7 +47,8 @@ class AuthViewModel @Inject constructor(
     private fun checkAuthStatus() {
         val user = authRepository.getUserData()
         if (user != null && (authRepository.isDeviceEnrolled() || authRepository.isTokenValid())) {
-            if (user.role == "surveyor" && !authRepository.hasFaceTemplate(user.id)) {
+            val surveyorId = authRepository.getSurveyorId() ?: user.id
+            if (user.role == "surveyor" && !authRepository.hasFaceTemplate(surveyorId)) {
                 _authState.value = AuthState.RequiresFaceEnrollment(user)
             } else {
                 _authState.value = AuthState.RequiresFaceAuth(user)
@@ -63,7 +64,9 @@ class AuthViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                val response = apiService.login(LoginRequest(username, password, totpToken))
+                val response = apiService.login(
+                    LoginRequest(username.trim(), password.trim(), totpToken)
+                )
                 if (response.isSuccessful && response.body() != null) {
                     val loginResponse = response.body()!!
                     authRepository.saveAuthData(loginResponse)
@@ -76,7 +79,8 @@ class AuthViewModel @Inject constructor(
                             return@launch
                         }
                         // Check if surveyor has face template after sync
-                        if (!authRepository.hasFaceTemplate(loginResponse.user.id)) {
+                        val surveyorId = authRepository.getSurveyorId() ?: loginResponse.user.id
+                        if (!authRepository.hasFaceTemplate(surveyorId)) {
                             _authState.value = AuthState.RequiresFaceEnrollment(loginResponse.user)
                         } else {
                             _authState.value = AuthState.RequiresFaceAuth(loginResponse.user)
@@ -85,7 +89,7 @@ class AuthViewModel @Inject constructor(
                         _authState.value = AuthState.Authenticated(loginResponse.user)
                     }
                 } else {
-                    _error.value = response.message().ifBlank { "Login failed" }
+                    _error.value = loginErrorMessage(response, response.errorBody()?.string())
                     _authState.value = AuthState.Unauthenticated
                 }
             } catch (e: Exception) {
@@ -98,6 +102,23 @@ class AuthViewModel @Inject constructor(
 
     }
 
+    private fun loginErrorMessage(response: retrofit2.Response<*>, body: String?): String {
+        val serverMessage = try {
+            body?.takeIf { it.isNotBlank() }
+                ?.let { org.json.JSONObject(it).optString("error", "") }
+                .orEmpty()
+        } catch (_: Exception) {
+            ""
+        }
+        return when {
+            serverMessage.isNotBlank() -> serverMessage
+            response.code() == 429 -> "Too many attempts. Please wait a minute and try again."
+            response.code() == 401 -> "Invalid username or password."
+            response.code() >= 500 -> "Server error. Please try again later."
+            else -> response.message().ifBlank { "Login failed" }
+        }
+    }
+
     private suspend fun syncAssignedFields(): Boolean {
         val authHeader = authRepository.getAuthHeader() ?: return false
         return try {
@@ -106,7 +127,8 @@ class AuthViewModel @Inject constructor(
             val syncResponse = response.body()!!
             val fields = syncResponse.fields.map { it.toEntity() }
             fieldRepository.replaceAssignedFields(fields)
-            // Save face templates from sync response
+            // Persist surveyor identity and face templates from the sync response
+            authRepository.saveSurveyorId(syncResponse.surveyorId)
             authRepository.saveFaceTemplates(syncResponse.faceTemplates)
             true
         } catch (_: Exception) {
@@ -124,9 +146,14 @@ class AuthViewModel @Inject constructor(
 
     fun completeFaceEnrollment() {
         val currentState = _authState.value
-        if (currentState is AuthState.RequiresFaceEnrollment) {
+        val user = when (currentState) {
+            is AuthState.RequiresFaceEnrollment -> currentState.user
+            is AuthState.RequiresFaceAuth -> currentState.user
+            else -> null
+        }
+        if (user != null) {
             authRepository.markDeviceEnrolled()
-            _authState.value = AuthState.Authenticated(currentState.user)
+            _authState.value = AuthState.Authenticated(user)
         }
     }
 
