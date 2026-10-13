@@ -28,7 +28,7 @@ class SyncWorker(
 
     companion object {
         private const val TAG = "SyncWorker"
-        private const val WORK_NAME = "periodic_sync"
+        const val WORK_NAME = "periodic_sync"
 
         fun schedulePeriodicSync(context: Context) {
             val constraints = Constraints.Builder()
@@ -48,6 +48,20 @@ class SyncWorker(
 
         fun cancelPeriodicSync(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+        }
+
+        fun enqueueNow(context: Context) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            val request = androidx.work.OneTimeWorkRequest.Builder(SyncWorker::class.java)
+                .setConstraints(constraints)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                WORK_NAME,
+                androidx.work.ExistingWorkPolicy.REPLACE,
+                request
+            )
         }
     }
 

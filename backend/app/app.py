@@ -111,7 +111,7 @@ def create_app(config_name: str = None) -> Flask:
     def readiness_check():
         """Readiness check - verifies database connectivity."""
         try:
-            db = next(get_db())
+            db = get_db()
             # Simple query to verify DB connection
             from sqlalchemy import text
             db.execute(text('SELECT 1'))
@@ -152,7 +152,7 @@ def create_app(config_name: str = None) -> Flask:
     def metrics():
         """Basic metrics endpoint."""
         try:
-            db = next(get_db())
+            db = get_db()
             from sqlalchemy import text
             from .models import User, Surveyor, Field, Visit, Phone
 
@@ -187,7 +187,7 @@ def create_app(config_name: str = None) -> Flask:
             return jsonify({'error': 'Username and password required'}), 400
 
         username = str(data['username']).strip()
-        db = next(get_db())
+        db = get_db()
 
         # First try to find a User with the username
         user = db.query(User).filter(User.username == username, User.is_active == True).first()
@@ -259,7 +259,7 @@ def create_app(config_name: str = None) -> Flask:
         from .models import User
 
         current_user_id = get_jwt_identity()
-        db = next(get_db())
+        db = get_db()
         user = db.query(User).filter(User.id == current_user_id, User.is_active == True).first()
 
         if not user:
@@ -320,7 +320,7 @@ def create_app(config_name: str = None) -> Flask:
         if new_password == current_password:
             return jsonify({'error': 'New password must be different from the current password'}), 400
 
-        db = next(get_db())
+        db = get_db()
         audit = create_audit_logger(db)
         user_id = get_jwt_identity()
         user = db.query(User).filter(

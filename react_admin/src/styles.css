@@ -34,3 +34,9 @@ input { width: 100%; border: 1px solid #d7e1da; border-radius: 9px; padding: 12p
   .status-badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
   .status-badge.registered { background: #dcfce7; color: #166534; }
   .status-badge.not-registered { background: #fee2e2; color: #991b1b; }
+  .status-badge.valid { background: #dcfce7; color: #166534; }
+  .status-badge.invalid { background: #fee2e2; color: #991b1b; }
+  .status-badge.flagged { background: #fef3c7; color: #92400e; }
+  .status-badge.pending { background: #e5e7eb; color: #374151; }
+  .photo-section { padding: 0 24px 8px; }.photo-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; margin: 12px 0 8px; }.photo-card { margin: 0; border: 1px solid #e2e9e3; border-radius: 10px; overflow: hidden; background: #f8fbf8; }.photo-card img { display: block; width: 100%; height: 150px; object-fit: cover; background: #eef2ef; }.photo-placeholder { display: flex; align-items: center; justify-content: center; height: 150px; color: #789083; font-size: 12px; background: #eef2ef; }.photo-card figcaption { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; font-size: 12px; color: #304a3d; }.photo-card figcaption .muted { font-size: 11px; word-break: break-all; }
+  .review-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 24px 24px; border-top: 1px solid #e2e9e3; }.review-actions h4 { margin: 4px 0; color: #183222; }.review-buttons { display: flex; gap: 10px; }.review-actions .notice { margin: 0; width: 100%; }.secondary.flag { border-color: #b45309; color: #92400e; }.secondary.danger { border-color: #a33b3b; color: #a33b3b; }

@@ -1,6 +1,7 @@
 package com.ofas.app.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +22,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +62,9 @@ fun HomeScreen(
 
     val userData by viewModel.userData.collectAsStateWithLifecycle()
     val hasFaceTemplate by viewModel.hasFaceTemplate.collectAsStateWithLifecycle()
+    val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
+    val syncStatusText by viewModel.syncStatusText.collectAsStateWithLifecycle("Ready")
+    val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle(0)
 
     LaunchedEffect(Unit) {
         viewModel.refresh()
@@ -107,9 +113,9 @@ fun HomeScreen(
                     Card(
                         shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(
-                            containerColor = if (hasFaceTemplate) 
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) 
-                            else 
+                            containerColor = if (hasFaceTemplate)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            else
                                 MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
                         ),
                         modifier = Modifier.padding(end = 8.dp)
@@ -147,7 +153,7 @@ fun HomeScreen(
                     )
                     StatCard(
                         title = "Pending",
-                        value = "2",
+                        value = pendingCount.toString(),
                         icon = Icons.Default.Warning
                     )
                     StatCard(
@@ -183,11 +189,12 @@ fun HomeScreen(
 
             ActionCard(
                 title = "Sync Data",
-                subtitle = "Upload pending visits to server",
-                icon = Icons.Default.Add,
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                onClick = onSync
+                subtitle = syncStatusText,
+                icon = if (isSyncing) Icons.Default.Refresh else Icons.Default.Add,
+                containerColor = if (isSyncing) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = if (isSyncing) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                onClick = { if (!isSyncing) viewModel.triggerSync() },
+                isLoading = isSyncing
             )
 
             ActionCard(
@@ -270,11 +277,13 @@ private fun ActionCard(
     icon: ImageVector,
     containerColor: androidx.compose.ui.graphics.Color,
     contentColor: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit
+    onClick: (() -> Unit)?,
+    isLoading: Boolean = false
 ) {
     Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isLoading, onClickLabel = "") { onClick?.invoke() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = containerColor)
     ) {
@@ -291,12 +300,19 @@ private fun ActionCard(
                     .background(contentColor.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = title,
-                    tint = contentColor,
-                    modifier = Modifier.size(24.dp)
-                )
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        color = contentColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = title,
+                        tint = contentColor,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {

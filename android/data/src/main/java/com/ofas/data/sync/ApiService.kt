@@ -72,6 +72,12 @@ interface ApiService {
         @Header("Authorization") authHeader: String,
         @Body request: ChangePasswordRequest
     ): Response<ChangePasswordResponse>
+
+    @POST("api/auth/register-device")
+    suspend fun registerDevice(
+        @Header("Authorization") authHeader: String,
+        @Body request: RegisterDeviceRequest
+    ): Response<RegisterDeviceResponse>
 }
 
 data class SyncFieldsResponse(
@@ -132,8 +138,11 @@ data class SubmitVisitRequest(
 
 data class PhotoData(
     val hash: String,
-    val s3Key: String,
-    val timestamp: String?
+    val s3Key: String? = null,
+    val timestamp: String?,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val accuracyMeters: Double? = null
 )
 
 data class TrailSnapshot(
@@ -262,6 +271,18 @@ data class AccountData(
 data class ChangePasswordRequest(
     @Json(name = "current_password") val currentPassword: String,
     @Json(name = "new_password") val newPassword: String
+)
+
+data class RegisterDeviceRequest(
+    val deviceId: String,
+    val publicKey: String,
+    val model: String,
+    @Json(name = "android_version")
+    val androidVersion: String
+)
+
+data class RegisterDeviceResponse(
+    val phoneId: String
 )
 
 data class ChangePasswordResponse(

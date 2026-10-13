@@ -52,4 +52,10 @@ class AuthTokenStore(context: Context) {
     fun saveSurveyorId(id: String) {
         preferences.edit().putString("surveyor_id", id).apply()
     }
+
+    fun phoneId(): String? = preferences.getString("phone_id", null)
+
+    fun savePhoneId(id: String) {
+        preferences.edit().putString("phone_id", id).apply()
+    }
 }

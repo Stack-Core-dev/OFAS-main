@@ -1,7 +1,26 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { api, Assignment, currentSession, Field, ManagedUser, Metrics, Surveyor, Visit, VisitDetail, login, logout } from "./api";
+import { api, Assignment, currentSession, Field, ManagedUser, Metrics, photoObjectUrl, Surveyor, Visit, VisitDetail, login, logout } from "./api";
 
 type Section = "overview" | "users" | "visits" | "surveyors" | "fields" | "assignments";
+
+type StatusTone = "valid" | "invalid" | "flagged" | "pending";
+
+function statusOf(visit: { review_status?: string | null; status?: string | null }): { label: string; tone: StatusTone } {
+  const value = (visit.review_status ?? visit.status ?? "").toLowerCase();
+  if (value === "valid") return { label: "Valid", tone: "valid" };
+  if (value === "invalid") return { label: "Invalid", tone: "invalid" };
+  if (value === "flagged") return { label: "Flagged", tone: "flagged" };
+  return { label: "Pending", tone: "pending" };
+}
+
+function shortId(id: string | null | undefined): string {
+  return id ? `#${id.slice(0, 8).toUpperCase()}` : "—";
+}
+
+function StatusBadge({ visit }: { visit: { review_status?: string | null; status?: string | null } }) {
+  const { label, tone } = statusOf(visit);
+  return <span className={`status-badge ${tone}`}>{label}</span>;
+}
 
 export function App() {
   const [session, setSession] = useState(currentSession());
@@ -184,16 +203,19 @@ function Assignments({ assignments, surveyors, fields, onAssignmentCreated, onCh
 
 function VisitDetails({ visits, surveyors }: { visits: Visit[]; surveyors: Surveyor[] }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [status, setStatus] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [surveyorId, setSurveyorId] = useState("");
   const [filteredVisits, setFilteredVisits] = useState(visits);
   const [detail, setDetail] = useState<VisitDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState("");
 
   useEffect(() => {
     const next = visits.filter((visit) =>
-      (!status || visit.review_status === status || visit.status === status) &&
+      (!statusFilter || visit.review_status === statusFilter || visit.status === statusFilter) &&
       (!surveyorId || visit.surveyor_id === surveyorId)
     );
     setFilteredVisits(next);
@@ -201,12 +223,33 @@ function VisitDetails({ visits, surveyors }: { visits: Visit[]; surveyors: Surve
       setSelectedId(null);
       setDetail(null);
     }
-  }, [visits, status, surveyorId, selectedId]);
+  }, [visits, statusFilter, surveyorId, selectedId]);
+
+  useEffect(() => {
+    if (!detail) { setPhotoUrls({}); return; }
+    const created: string[] = [];
+    let active = true;
+    const keys: string[] = [];
+    if (detail.visit.selfie_photo_s3_key) keys.push(detail.visit.selfie_photo_s3_key);
+    (detail.visit.field_photos ?? []).forEach((photo) => { if (photo?.s3_key) keys.push(photo.s3_key); });
+    keys.forEach((key) => {
+      photoObjectUrl(key)
+        .then((url) => {
+          if (!active) { URL.revokeObjectURL(url); return; }
+          created.push(url);
+          setPhotoUrls((current) => ({ ...current, [key]: url }));
+        })
+        .catch(() => {});
+    });
+    return () => { active = false; created.forEach((url) => URL.revokeObjectURL(url)); };
+  }, [detail]);
 
   async function selectVisit(id: string) {
     setSelectedId(id);
     setLoading(true);
     setError("");
+    setReviewMessage("");
+    setPhotoUrls({});
     try {
       setDetail(await api.visitDetail(id));
     } catch (cause) {
@@ -216,6 +259,35 @@ function VisitDetails({ visits, surveyors }: { visits: Visit[]; surveyors: Surve
     }
   }
 
+  async function submitReview(decision: "VALID" | "INVALID" | "FLAGGED") {
+    if (!detail) return;
+    const notes = decision === "VALID"
+      ? ""
+      : (window.prompt(`Add notes for marking this visit ${decision.toLowerCase()} (optional)`) ?? "");
+    setReviewBusy(true);
+    setReviewMessage("");
+    try {
+      const response = await api.reviewVisit(detail.visit.id, decision, notes);
+      setDetail({
+        ...detail,
+        visit: {
+          ...detail.visit,
+          status: decision.toLowerCase(),
+          review_status: response.review_status,
+          review_notes: notes,
+          reviewed_at: response.reviewed_at
+        }
+      });
+      setReviewMessage(`Visit marked as ${response.review_status}.`);
+    } catch (cause) {
+      setReviewMessage(cause instanceof Error ? cause.message : "Unable to review visit.");
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  const fieldPhotos = detail?.visit.field_photos ?? [];
+
   return <div className="page">
     <section className="panel">
       <div className="panel-heading">
@@ -223,34 +295,80 @@ function VisitDetails({ visits, surveyors }: { visits: Visit[]; surveyors: Surve
       </div>
       <div className="filter-bar">
         <label>Surveyor<select value={surveyorId} onChange={(event) => setSurveyorId(event.target.value)}><option value="">All surveyors</option>{surveyors.map((surveyor) => <option key={surveyor.id} value={surveyor.id}>{surveyor.employee_id} — {surveyor.full_name}</option>)}</select></label>
-        <label>Status<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{["queued", "syncing", "synced", "failed", "valid", "invalid", "flagged"].map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="pending">Pending</option><option value="valid">Valid</option><option value="flagged">Flagged</option><option value="invalid">Invalid</option></select></label>
       </div>
       {error && <div className="error">{error}</div>}
-      <DataTable title="" headers={["Visit", "Surveyor", "Field", "Captured", "GPS", "Status", "Review"]} rows={filteredVisits.map((visit) => [
-        <button type="button" className="link-button" onClick={() => void selectVisit(visit.id)}>{visit.visit_id}</button>,
+      <DataTable title="" headers={["Visit", "Surveyor", "Field", "Captured", "GPS", "Status", "Reviewed"]} rows={filteredVisits.map((visit) => [
+        <button type="button" className="link-button" title={visit.visit_id} onClick={() => void selectVisit(visit.id)}>{shortId(visit.visit_id)}</button>,
         visit.surveyor_name ?? "—",
         visit.field_code ?? "—",
         new Date(visit.satellite_timestamp).toLocaleString(),
         `${visit.latitude.toFixed(5)}, ${visit.longitude.toFixed(5)}`,
-        visit.status,
-        visit.review_status ?? "Unreviewed"
+        <StatusBadge key={`${visit.id}-status`} visit={visit} />,
+        visit.reviewed_at ? new Date(visit.reviewed_at).toLocaleString() : "Unreviewed"
       ])} />
     </section>
     {selectedId && <section className="panel detail-panel">
-      <div className="panel-heading"><div><p className="eyebrow">SELECTED VISIT</p><h3>{detail?.visit.visit_id ?? selectedId}</h3></div>{loading && <span className="muted">Loading...</span>}</div>
+      <div className="panel-heading"><div><p className="eyebrow">SELECTED VISIT</p><h3 title={detail?.visit.visit_id ?? selectedId}>{shortId(detail?.visit.visit_id ?? selectedId)}</h3></div>{loading && <span className="muted">Loading...</span>}</div>
       {detail && <div className="detail-grid">
+        <div className="detail-item"><span>Status</span><strong><StatusBadge visit={detail.visit} /></strong></div>
+        <DetailItem label="Visit ID" value={detail.visit.visit_id} />
         <DetailItem label="Surveyor" value={detail.visit.surveyor ? `${detail.visit.surveyor.employee_id} — ${detail.visit.surveyor.full_name}` : "—"} />
         <DetailItem label="Field" value={detail.visit.field ? `${detail.visit.field.field_code} — ${detail.visit.field.name}` : "—"} />
         <DetailItem label="Captured" value={new Date(detail.visit.satellite_timestamp).toLocaleString()} />
         <DetailItem label="Coordinates" value={`${detail.visit.latitude}, ${detail.visit.longitude}`} />
         <DetailItem label="GPS accuracy" value={`${detail.visit.accuracy_meters} m`} />
-        <DetailItem label="Phone" value={detail.visit.phone_id} />
-        <DetailItem label="Visit status" value={detail.visit.status} />
-        <DetailItem label="Review" value={detail.visit.review_status ?? "Unreviewed"} />
+        <DetailItem label="Selfie coords" value={detail.visit.selfie_latitude != null && detail.visit.selfie_longitude != null ? `${detail.visit.selfie_latitude.toFixed(5)}, ${detail.visit.selfie_longitude.toFixed(5)}` : "—"} />
+        <DetailItem label="Selfie accuracy" value={detail.visit.selfie_accuracy_meters != null ? `${detail.visit.selfie_accuracy_meters} m` : "—"} />
         <DetailItem label="Face match" value={detail.visit.face_match_score == null ? "—" : `${(detail.visit.face_match_score * 100).toFixed(1)}%`} />
         <DetailItem label="Liveness" value={detail.visit.liveness_verified ? "Verified" : "Not verified"} />
         <DetailItem label="Trail points" value={String(detail.trail_entries.length)} />
+        <DetailItem label="Reviewed at" value={detail.visit.reviewed_at ? new Date(detail.visit.reviewed_at).toLocaleString() : "Unreviewed"} />
         <DetailItem label="Review notes" value={detail.visit.review_notes ?? "—"} />
+      </div>}
+      {detail && <div className="photo-section">
+        <div className="subtable-heading"><h3>Photos</h3><span className="muted">{fieldPhotos.length} field photo(s) · selfie {detail.visit.selfie_photo_s3_key ? "attached" : "missing"}</span></div>
+        <div className="photo-gallery">
+          <figure className="photo-card">
+            {detail.visit.selfie_photo_s3_key && photoUrls[detail.visit.selfie_photo_s3_key]
+              ? <img src={photoUrls[detail.visit.selfie_photo_s3_key]} alt="Selfie" />
+              : <div className="photo-placeholder">{detail.visit.selfie_photo_s3_key ? "Loading..." : "No selfie"}</div>}
+            <figcaption>
+              <strong>Selfie</strong>
+              <span className="muted">{detail.visit.selfie_photo_hash ? `${detail.visit.selfie_photo_hash.slice(0, 16)}…` : "—"}</span>
+              {detail.visit.selfie_latitude != null && detail.visit.selfie_longitude != null && (
+                <span className="muted">@ {detail.visit.selfie_latitude.toFixed(5)}, {detail.visit.selfie_longitude.toFixed(5)}</span>
+              )}
+              {detail.visit.selfie_accuracy_meters != null && (
+                <span className="muted">±{detail.visit.selfie_accuracy_meters} m</span>
+              )}
+            </figcaption>
+          </figure>
+          {fieldPhotos.map((photo, index) => (
+            <figure className="photo-card" key={`${photo.hash}-${index}`}>
+              {photo.s3_key && photoUrls[photo.s3_key]
+                ? <img src={photoUrls[photo.s3_key]} alt={`Field photo ${index + 1}`} />
+                : <div className="photo-placeholder">{photo.s3_key ? "Loading..." : "Not uploaded"}</div>}
+              <figcaption>
+                <strong>Field photo {index + 1}</strong>
+                <span className="muted">{photo.hash.slice(0, 16)}…</span>
+                <span className="muted">{new Date(photo.timestamp).toLocaleString()}</span>
+                {photo.latitude != null && photo.longitude != null && (
+                  <span className="muted">@ {photo.latitude.toFixed(5)}, {photo.longitude.toFixed(5)}</span>
+                )}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      </div>}
+      {detail && <div className="review-actions">
+        <div><p className="eyebrow">DECISION</p><h4>Mark this visit</h4><p className="muted">{detail.visit.review_status ? `Already marked ${detail.visit.review_status}.` : "Choose an outcome for this visit."}</p></div>
+        <div className="review-buttons">
+          <button className="primary" disabled={reviewBusy || !!detail.visit.review_status} onClick={() => void submitReview("VALID")}>Valid</button>
+          <button className="secondary flag" disabled={reviewBusy || !!detail.visit.review_status} onClick={() => void submitReview("FLAGGED")}>Flagged</button>
+          <button className="secondary danger" disabled={reviewBusy || !!detail.visit.review_status} onClick={() => void submitReview("INVALID")}>Invalid</button>
+        </div>
+        {reviewMessage && <div className="notice">{reviewMessage}</div>}
       </div>}
     </section>}
   </div>;
@@ -652,16 +770,9 @@ function Overview({ metrics, visits, onNavigate }: { metrics: Metrics | null; vi
       <Stat label="Active surveyors" value={counts?.surveyors ?? "—"} accent="blue" />
       <Stat label="Registered fields" value={counts?.fields ?? "—"} accent="gold" />
       <Stat label="Registered phones" value={counts?.phones ?? "—"} accent="purple" />
-      {faceStats?.summary && (
-        <div>
-          <Stat label="Face Registered" value={faceStats.summary.face_registered} accent="green" />
-          <Stat label="Face Not Registered" value={faceStats.summary.face_not_registered} accent="red" />
-          <Stat label="Registration Rate" value={`${faceStats.summary.registration_rate}%`} accent="blue" />
-        </div>
-      )}
     </div>
     <section className="panel"><div className="panel-heading"><div><p className="eyebrow">AUDIT QUEUE</p><h3>Recent field visits</h3></div><button className="link-button" onClick={() => onNavigate("visits")}>View all →</button></div>
-      <DataTable compact title="" headers={["Visit", "Surveyor", "Field", "Captured", "Review"]} rows={visits.slice(0, 5).map((visit) => [visit.visit_id, visit.surveyor_name ?? "—", visit.field_code ?? "—", new Date(visit.satellite_timestamp).toLocaleDateString(), visit.review_status ?? "pending"])} />
+      <DataTable compact title="" headers={["Visit", "Surveyor", "Field", "Captured", "Status"]} rows={visits.slice(0, 5).map((visit) => [<span key={`${visit.id}-id`} title={visit.visit_id}>{shortId(visit.visit_id)}</span>, visit.surveyor_name ?? "—", visit.field_code ?? "—", new Date(visit.satellite_timestamp).toLocaleDateString(), <StatusBadge key={`${visit.id}-badge`} visit={visit} />])} />
     </section>
   </div>;
 }

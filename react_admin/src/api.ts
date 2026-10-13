@@ -22,6 +22,15 @@ export type Metrics = {
   };
 };
 
+export type FieldPhoto = {
+  hash: string;
+  s3_key: string | null;
+  timestamp: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  accuracy_meters?: number | null;
+};
+
 export type Visit = {
   id: string;
   visit_id: string;
@@ -38,10 +47,14 @@ export type Visit = {
   speed?: number | null;
   bearing?: number | null;
   selfie_photo_s3_key?: string | null;
-  field_photos?: unknown;
+  selfie_latitude?: number | null;
+  selfie_longitude?: number | null;
+  selfie_accuracy_meters?: number | null;
+  field_photos?: FieldPhoto[] | null;
   face_match_score?: number | null;
   liveness_verified?: boolean;
   synced_at?: string | null;
+  reviewed_at?: string | null;
   review_notes?: string | null;
 };
 
@@ -51,6 +64,9 @@ export type VisitDetail = {
     field: { id: string; field_code: string; name: string; center_lat: number; center_lon: number; radius_meters: number } | null;
     phone_id: string;
     selfie_photo_hash: string;
+    selfie_latitude?: number | null;
+    selfie_longitude?: number | null;
+    selfie_accuracy_meters?: number | null;
     trail_snapshot: unknown;
     signature: string;
     signed_by_key_id: string;
@@ -173,6 +189,15 @@ export function logout() {
   saveSession(null);
 }
 
+export async function photoObjectUrl(s3Key: string): Promise<string> {
+  const headers = new Headers();
+  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
+  const encoded = s3Key.split("/").map(encodeURIComponent).join("/");
+  const response = await fetch(`${API_BASE_URL}/api/review/photos/${encoded}/raw`, { headers });
+  if (!response.ok) throw new Error(`Photo unavailable (${response.status})`);
+  return URL.createObjectURL(await response.blob());
+}
+
 export async function login(username: string, password: string, totpToken?: string) {
   const response = await request<AuthSession | { requires_totp: true; challenge: string }>("/api/auth/login", {
     method: "POST",
@@ -198,6 +223,11 @@ export const api = {
     return request<{ visits: Visit[]; pagination: { total: number } }>(`/api/review/visits?${query.toString()}`);
   },
   visitDetail: (id: string) => request<VisitDetail>(`/api/review/visits/${id}`),
+  reviewVisit: (id: string, decision: "VALID" | "INVALID" | "FLAGGED", notes = "") =>
+    request<{ message: string; review_status: string; reviewed_at: string }>(`/api/review/visits/${id}/review`, {
+      method: "POST",
+      body: JSON.stringify({ decision, notes })
+    }),
   surveyors: () => request<{ surveyors: Surveyor[] }>("/api/admin/surveyors?per_page=100&active=false"),
   fields: () => request<{ fields: Field[] }>("/api/admin/fields?per_page=100"),
   assignments: () => request<{ assignments: Assignment[] }>("/api/admin/assignments?per_page=200"),

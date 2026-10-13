@@ -66,6 +66,18 @@ class TrailManager private constructor(
         scheduleNextRecording()
     }
 
+    suspend fun captureEntryNow(): TrailEntryEntity? {
+        val location = getCurrentLocation()
+        return location?.let {
+            currentSequence++
+            val entry = createTrailEntry(it)
+            database.trailEntryDao().insert(entry)
+            lastEntryHash = entry.entryHash
+            Log.d(TAG, "Recorded trail entry #$currentSequence (on demand)")
+            entry
+        }
+    }
+
     fun stopRecording() {
         isRecording = false
     }

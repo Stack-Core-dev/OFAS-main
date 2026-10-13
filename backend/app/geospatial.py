@@ -39,8 +39,17 @@ def is_within_field_radius_postgis(
     field_id: str, tolerance: float = 10.0
 ) -> Tuple[bool, Optional[float]]:
     field = db.query(Field).filter(Field.id == field_id).first()
-    if not field or not field.center_point:
+    if not field:
         return False, None
+
+    if not field.center_point:
+        # Fall back to the haversine implementation using the stored
+        # latitude/longitude when the PostGIS geometry point is missing (e.g.
+        # rows created before center_point was populated).
+        return is_within_field_radius(
+            visit_lat, visit_lon, visit_accuracy,
+            field.center_lat, field.center_lon, field.radius_meters, tolerance
+        )
     
     visit_point = create_point(visit_lat, visit_lon)
     
@@ -92,6 +101,32 @@ def validate_visit_location(
             f"exceeds radius {field.radius_meters}m + accuracy {visit_accuracy}m + tolerance {tolerance}m"
     
     return True, distance or 0.0, "Location valid"
+
+
+def validate_point_within_field(
+    db: Session, lat: float, lon: float, accuracy: Optional[float],
+    field_id: str, label: str = "Point"
+) -> Tuple[bool, float, str]:
+    """Validate an evidence point (field photo / selfie) against the assigned
+    field radius so captured evidence must be inside the farm boundary."""
+    field = db.query(Field).filter(Field.id == field_id, Field.is_active == True).first()
+    if not field:
+        return False, 0.0, "Field not found or inactive"
+
+    tolerance = config['default']().FIELD_RADIUS_TOLERANCE
+    effective_accuracy = accuracy or 0.0
+    is_within, distance = is_within_field_radius(
+        lat, lon, effective_accuracy,
+        field.center_lat, field.center_lon, field.radius_meters, tolerance
+    )
+    distance = distance or 0.0
+
+    if not is_within:
+        return False, distance, \
+            f"{label} location {distance:.1f}m from field center, " \
+            f"exceeds radius {field.radius_meters}m + accuracy {effective_accuracy}m + tolerance {tolerance}m"
+
+    return True, distance, "Location valid"
 
 
 def get_field_center_wkt(field: Field) -> str:

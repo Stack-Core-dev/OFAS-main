@@ -42,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +51,12 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+import com.google.android.gms.tasks.Tasks
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.Executor
@@ -57,7 +64,10 @@ import java.util.concurrent.Executor
 data class CapturedPhoto(
     val file: File,
     val hash: String,
-    val capturedAt: Long
+    val capturedAt: Long,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val accuracyMeters: Double? = null
 )
 
 @Composable
@@ -154,7 +164,7 @@ fun PhotoCaptureScreen(
             Button(
                 onClick = {
                     if (!cameraReady || photos.size >= 10) return@Button
-                    capturePhoto(context.cacheDir, imageCapture, executor) { photo ->
+                    capturePhoto(context, imageCapture, executor) { photo ->
                         photos.add(photo)
                     }
                 },
@@ -180,12 +190,28 @@ fun PhotoCaptureScreen(
 }
 
 private fun capturePhoto(
-    cacheDir: File,
+    context: android.content.Context,
     imageCapture: ImageCapture,
     executor: Executor,
     onCaptured: (CapturedPhoto) -> Unit
 ) {
-    val file = File(cacheDir, "visit_${System.currentTimeMillis()}.jpg")
+    val file = File(context.cacheDir, "visit_${System.currentTimeMillis()}.jpg")
+    val location = try {
+        val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        if (fine || coarse) {
+            Tasks.await(
+                LocationServices.getFusedLocationProviderClient(context)
+                    .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, CancellationTokenSource().token)
+            )?.takeUnless { it.isMock }
+        } else {
+            null
+        }
+    } catch (e: Exception) {
+        null
+    }
     imageCapture.takePicture(
         ImageCapture.OutputFileOptions.Builder(file).build(),
         executor,
@@ -194,7 +220,16 @@ private fun capturePhoto(
                 val hash = MessageDigest.getInstance("SHA-256")
                     .digest(file.readBytes())
                     .joinToString("") { "%02x".format(it) }
-                onCaptured(CapturedPhoto(file, hash, System.currentTimeMillis()))
+                onCaptured(
+                    CapturedPhoto(
+                        file = file,
+                        hash = hash,
+                        capturedAt = System.currentTimeMillis(),
+                        latitude = location?.latitude,
+                        longitude = location?.longitude,
+                        accuracyMeters = location?.accuracy?.toDouble()
+                    )
+                )
             }
 
             override fun onError(exception: ImageCaptureException) {

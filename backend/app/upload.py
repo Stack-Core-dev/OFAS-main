@@ -80,7 +80,7 @@ def upload_photo():
     if not ensure_bucket_exists():
         return jsonify({'error': 'S3 bucket not accessible'}), 503
 
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
 
     payload = request.get_json()
@@ -92,7 +92,13 @@ def upload_photo():
         if field not in payload:
             return jsonify({'error': f'Missing required field: {field}'}), 400
 
-    visit = db.query(Visit).filter(Visit.id == payload['visit_id']).first()
+    visit = db.query(Visit).filter(Visit.visit_id == payload['visit_id']).first()
+    if not visit:
+        try:
+            import uuid as _uuid
+            visit = db.query(Visit).filter(Visit.id == _uuid.UUID(str(payload['visit_id']))).first()
+        except (ValueError, AttributeError, TypeError):
+            visit = None
     if not visit:
         return jsonify({'error': 'Visit not found'}), 404
 
@@ -159,25 +165,28 @@ def upload_photo():
         visit.selfie_photo_hash = photo_hash
         visit.selfie_photo_s3_key = s3_key
     else:
-        # Update field_photos array
-        field_photos = visit.field_photos or []
-        if photo_index >= len(field_photos):
-            field_photos.extend([None] * (photo_index - len(field_photos) + 1))
-        field_photos[photo_index] = {
+        # Update field_photos array (copy so SQLAlchemy detects the change).
+        # Merge into the submitted entry so signed fields (latitude, longitude,
+        # accuracy_meters) captured on the device are preserved.
+        field_photos = list(visit.field_photos or [])
+        while photo_index >= len(field_photos):
+            field_photos.append({})
+        entry = dict(field_photos[photo_index] or {})
+        entry.update({
             'hash': photo_hash,
             's3_key': s3_key,
             'timestamp': datetime.utcnow().isoformat() + 'Z',
             'metadata': payload.get('metadata', {})
-        }
+        })
+        field_photos[photo_index] = entry
         visit.field_photos = field_photos
 
     visit.updated_at = datetime.utcnow()
-    db.commit()
 
     audit.log(
         action='PHOTO_UPLOADED',
         entity_type='photo',
-        entity_id=s3_key,
+        entity_id=str(visit.id),
         user_id=get_current_user_id(),
         visit_id=str(visit.id),
         new_values={
@@ -189,6 +198,8 @@ def upload_photo():
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+
+    db.commit()
 
     # Generate presigned URL for immediate access
     presigned_url = None

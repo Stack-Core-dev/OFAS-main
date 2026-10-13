@@ -16,7 +16,7 @@ face_bp = Blueprint('face', __name__, url_prefix='/api/face')
 @require_admin
 def list_face_templates():
     """List all surveyors with face templates."""
-    db = next(get_db())
+    db = get_db()
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
 
@@ -42,7 +42,7 @@ def list_face_templates():
 @require_admin
 def get_face_template(surveyor_id):
     """Get face template for a surveyor (admin only)."""
-    db = next(get_db())
+    db = get_db()
 
     surveyor = db.query(Surveyor).filter(Surveyor.id == surveyor_id).first()
     if not surveyor:
@@ -72,7 +72,7 @@ def upload_face_template(surveyor_id):
         "version": 1
     }
     """
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
 
     surveyor = db.query(Surveyor).filter(Surveyor.id == surveyor_id).first()
@@ -100,8 +100,6 @@ def upload_face_template(surveyor_id):
     surveyor.face_template_version = payload.get('version', surveyor.face_template_version + 1)
     surveyor.updated_at = datetime.utcnow()
 
-    db.commit()
-
     audit.log(
         action='FACE_TEMPLATE_UPDATED',
         entity_type='surveyor',
@@ -112,6 +110,8 @@ def upload_face_template(surveyor_id):
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+
+    db.commit()
 
     return jsonify({
         'message': 'Face template uploaded',
@@ -124,7 +124,7 @@ def upload_face_template(surveyor_id):
 @require_admin
 def delete_face_template(surveyor_id):
     """Delete face template for a surveyor."""
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
 
     surveyor = db.query(Surveyor).filter(Surveyor.id == surveyor_id).first()
@@ -163,7 +163,7 @@ def enroll_face_template():
         "version": 1
     }
     """
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
 
     user_id = get_current_user_id()
@@ -206,8 +206,6 @@ def enroll_face_template():
     surveyor.face_template_version = payload.get('version', surveyor.face_template_version + 1)
     surveyor.updated_at = datetime.utcnow()
 
-    db.commit()
-
     audit.log(
         action='FACE_TEMPLATE_ENROLLED',
         entity_type='surveyor',
@@ -218,6 +216,8 @@ def enroll_face_template():
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+
+    db.commit()
 
     return jsonify({
         'message': 'Face template enrolled successfully',
@@ -230,7 +230,7 @@ def enroll_face_template():
 @require_surveyor
 def get_enrollment_status():
     """Get face enrollment status for the authenticated surveyor."""
-    db = next(get_db())
+    db = get_db()
     user_id = get_current_user_id()
     
     surveyor = db.query(Surveyor).filter(

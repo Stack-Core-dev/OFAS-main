@@ -30,7 +30,7 @@ def register_commands(app):
     def create_super_admin(username, email, password):
         """Create a super admin user."""
         init_db()
-        db = next(get_db())
+        db = get_db()
 
         existing = db.query(User).filter(User.username == username).first()
         if existing:
@@ -54,7 +54,7 @@ def register_commands(app):
     def create_admin(username, email, password):
         """Create an admin user."""
         init_db()
-        db = next(get_db())
+        db = get_db()
 
         existing = db.query(User).filter(User.username == username).first()
         if existing:
@@ -75,7 +75,7 @@ def register_commands(app):
     def list_users():
         """List all users."""
         init_db()
-        db = next(get_db())
+        db = get_db()
         users = db.query(User).all()
         for u in users:
             click.echo(f"{u.id} | {u.username} | {u.email} | {u.role.value} | {'active' if u.is_active else 'inactive'}")

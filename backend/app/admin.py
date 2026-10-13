@@ -18,6 +18,7 @@ from .validation import (
     validate_username
 )
 from .audit import create_audit_logger, AUDIT_ACTIONS
+from .geospatial import create_point
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 
@@ -25,7 +26,7 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/api/admin')
 @admin_bp.route('/users', methods=['GET'])
 @require_admin
 def list_users():
-    db = next(get_db())
+    db = get_db()
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     role = request.args.get('role')
@@ -55,7 +56,7 @@ def list_users():
 @admin_bp.route('/users', methods=['POST'])
 @require_super_admin
 def create_user():
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json(silent=True) or {}
     
@@ -102,6 +103,7 @@ def create_user():
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'id': str(user.id), 'message': 'User created'}), 201
 
@@ -109,7 +111,7 @@ def create_user():
 @admin_bp.route('/users/<uuid:user_id>', methods=['PUT'])
 @require_super_admin
 def update_user(user_id):
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json(silent=True) or {}
     
@@ -160,6 +162,7 @@ def update_user(user_id):
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'message': 'User updated'})
 
@@ -167,7 +170,7 @@ def update_user(user_id):
 @admin_bp.route('/users/<uuid:user_id>', methods=['DELETE'])
 @require_super_admin
 def delete_user(user_id):
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -192,6 +195,7 @@ def delete_user(user_id):
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
 
     return jsonify({'message': 'User deactivated'})
 
@@ -199,7 +203,7 @@ def delete_user(user_id):
 @admin_bp.route('/surveyors', methods=['GET'])
 @require_admin
 def list_surveyors():
-    db = next(get_db())
+    db = get_db()
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     active_only = request.args.get('active', 'true').lower() == 'true'
@@ -236,7 +240,7 @@ def list_surveyors():
 @admin_bp.route('/surveyors', methods=['POST'])
 @require_admin
 def create_surveyor():
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json()
     
@@ -283,6 +287,7 @@ def create_surveyor():
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'id': str(surveyor.id), 'message': 'Surveyor created'}), 201
 
@@ -290,7 +295,7 @@ def create_surveyor():
 @admin_bp.route('/surveyors/<uuid:surveyor_id>', methods=['PUT'])
 @require_admin
 def update_surveyor(surveyor_id):
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json(silent=True) or {}
     
@@ -347,6 +352,7 @@ def update_surveyor(surveyor_id):
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'message': 'Surveyor updated'})
 
@@ -354,7 +360,7 @@ def update_surveyor(surveyor_id):
 @admin_bp.route('/surveyors/<uuid:surveyor_id>', methods=['DELETE'])
 @require_admin
 def delete_surveyor(surveyor_id):
-    db = next(get_db())
+    db = get_db()
     surveyor = db.query(Surveyor).filter(Surveyor.id == surveyor_id).first()
     if not surveyor:
         return jsonify({'error': 'Surveyor not found'}), 404
@@ -372,7 +378,7 @@ def delete_surveyor(surveyor_id):
 @require_admin
 def get_face_registration_stats():
     """Get face registration statistics for all surveyors."""
-    db = next(get_db())
+    db = get_db()
     
     total = db.query(Surveyor).filter(Surveyor.is_active == True).count()
     registered = db.query(Surveyor).filter(
@@ -418,7 +424,7 @@ def get_face_registration_stats():
 @admin_bp.route('/fields', methods=['GET'])
 @require_admin
 def list_fields():
-    db = next(get_db())
+    db = get_db()
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     active_only = request.args.get('active', 'true').lower() == 'true'
@@ -451,7 +457,7 @@ def list_fields():
 @admin_bp.route('/fields', methods=['POST'])
 @require_admin
 def create_field():
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json()
     
@@ -465,6 +471,7 @@ def create_field():
         crop_type=data.get('crop_type'),
         center_lat=data['center_lat'],
         center_lon=data['center_lon'],
+        center_point=create_point(data['center_lat'], data['center_lon']),
         radius_meters=data['radius_meters'],
         reference_photos=data.get('reference_photos', []),
         field_metadata=data.get('field_metadata', data.get('metadata', {}))
@@ -486,6 +493,7 @@ def create_field():
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'id': str(field.id), 'message': 'Field created'}), 201
 
@@ -493,7 +501,7 @@ def create_field():
 @admin_bp.route('/fields/<uuid:field_id>', methods=['PUT'])
 @require_admin
 def update_field(field_id):
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json()
     
@@ -510,6 +518,7 @@ def update_field(field_id):
     if 'center_lat' in data and 'center_lon' in data:
         field.center_lat = data['center_lat']
         field.center_lon = data['center_lon']
+        field.center_point = create_point(data['center_lat'], data['center_lon'])
     if 'radius_meters' in data:
         field.radius_meters = data['radius_meters']
     if 'reference_photos' in data:
@@ -532,6 +541,7 @@ def update_field(field_id):
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'message': 'Field updated'})
 
@@ -539,7 +549,7 @@ def update_field(field_id):
 @admin_bp.route('/fields/<uuid:field_id>', methods=['DELETE'])
 @require_admin
 def delete_field(field_id):
-    db = next(get_db())
+    db = get_db()
     field = db.query(Field).filter(Field.id == field_id).first()
     if not field:
         return jsonify({'error': 'Field not found'}), 404
@@ -551,7 +561,7 @@ def delete_field(field_id):
 @admin_bp.route('/phones', methods=['GET'])
 @require_admin
 def list_phones():
-    db = next(get_db())
+    db = get_db()
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     
@@ -578,7 +588,7 @@ def list_phones():
 @admin_bp.route('/phones', methods=['POST'])
 @require_admin
 def register_phone():
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json()
     
@@ -611,6 +621,7 @@ def register_phone():
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'id': str(phone.id), 'message': 'Phone registered'}), 201
 
@@ -618,7 +629,7 @@ def register_phone():
 @admin_bp.route('/phones/<uuid:phone_id>/block', methods=['POST'])
 @require_admin
 def block_phone(phone_id):
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json() or {}
     
@@ -640,6 +651,7 @@ def block_phone(phone_id):
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'message': 'Phone blocked'})
 
@@ -647,7 +659,7 @@ def block_phone(phone_id):
 @admin_bp.route('/assignments', methods=['GET'])
 @require_admin
 def list_assignments():
-    db = next(get_db())
+    db = get_db()
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 50, type=int), 200)
     surveyor_id = request.args.get('surveyor_id')
@@ -678,7 +690,7 @@ def list_assignments():
 @admin_bp.route('/assignments', methods=['POST'])
 @require_admin
 def create_assignment():
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json()
     
@@ -715,6 +727,7 @@ def create_assignment():
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'id': str(assignment.id), 'message': 'Assignment created'}), 201
 
@@ -722,7 +735,7 @@ def create_assignment():
 @admin_bp.route('/assignments/<uuid:assignment_id>', methods=['PUT'])
 @require_admin
 def update_assignment(assignment_id):
-    db = next(get_db())
+    db = get_db()
     data = request.get_json() or {}
     validation = validate_assignment_payload(data)
     if not validation.is_valid:
@@ -743,7 +756,7 @@ def update_assignment(assignment_id):
 @admin_bp.route('/assignments/<uuid:assignment_id>', methods=['DELETE'])
 @require_admin
 def delete_assignment(assignment_id):
-    db = next(get_db())
+    db = get_db()
     assignment = db.query(Assignment).filter(Assignment.id == assignment_id).first()
     if not assignment:
         return jsonify({'error': 'Assignment not found'}), 404

@@ -15,7 +15,7 @@ review_bp = Blueprint('review', __name__, url_prefix='/api/review')
 @review_bp.route('/visits', methods=['GET'])
 @require_admin
 def list_visits():
-    db = next(get_db())
+    db = get_db()
     page = request.args.get('page', 1, type=int)
     per_page = min(request.args.get('per_page', 20, type=int), 100)
     status = request.args.get('status')
@@ -76,7 +76,7 @@ def list_visits():
 @review_bp.route('/visits/<uuid:visit_id>', methods=['GET'])
 @require_admin
 def get_visit_detail(visit_id):
-    db = next(get_db())
+    db = get_db()
     
     visit = db.query(Visit).filter(Visit.id == visit_id).first()
     if not visit:
@@ -113,6 +113,9 @@ def get_visit_detail(visit_id):
             'bearing': visit.bearing,
             'selfie_photo_hash': visit.selfie_photo_hash,
             'selfie_photo_s3_key': visit.selfie_photo_s3_key,
+            'selfie_latitude': visit.selfie_latitude,
+            'selfie_longitude': visit.selfie_longitude,
+            'selfie_accuracy_meters': visit.selfie_accuracy_meters,
             'field_photos': visit.field_photos,
             'face_match_score': visit.face_match_score,
             'liveness_verified': visit.liveness_verified,
@@ -141,7 +144,7 @@ def get_visit_detail(visit_id):
 @review_bp.route('/visits/<uuid:visit_id>/review', methods=['POST'])
 @require_admin
 def review_visit(visit_id):
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     data = request.get_json()
     
@@ -159,7 +162,8 @@ def review_visit(visit_id):
     notes = data.get('notes', '')
     
     old_status = visit.review_status
-    visit.review_status = VisitStatus(decision)
+    old_visit_status = visit.status
+    visit.review_status = VisitStatus(decision.lower())
     visit.reviewed_by = g.current_user.id
     visit.reviewed_at = datetime.utcnow()
     visit.review_notes = notes
@@ -179,11 +183,12 @@ def review_visit(visit_id):
         entity_id=str(visit.id),
         user_id=get_current_user_id(),
         visit_id=str(visit.id),
-        old_values={'review_status': old_status.value if old_status else None, 'status': visit.status.value},
+        old_values={'review_status': old_status.value if old_status else None, 'status': old_visit_status.value},
         new_values={'review_status': visit.review_status.value, 'status': visit.status.value, 'notes': notes},
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({
         'message': 'Visit reviewed',
@@ -195,7 +200,7 @@ def review_visit(visit_id):
 @review_bp.route('/visits/<uuid:visit_id>/compare', methods=['POST'])
 @require_admin
 def compare_faces(visit_id):
-    db = next(get_db())
+    db = get_db()
     data = request.get_json()
     
     visit = db.query(Visit).filter(Visit.id == visit_id).first()
@@ -219,6 +224,7 @@ def compare_faces(visit_id):
         ip_address=request.remote_addr,
         user_agent=request.user_agent.string
     )
+    db.commit()
     
     return jsonify({'message': 'Comparison recorded'})
 
@@ -226,7 +232,7 @@ def compare_faces(visit_id):
 @review_bp.route('/stats', methods=['GET'])
 @require_admin
 def get_review_stats():
-    db = next(get_db())
+    db = get_db()
     
     total = db.query(func.count(Visit.id)).scalar()
     by_status = dict(db.query(Visit.review_status, func.count(Visit.id))
@@ -256,3 +262,26 @@ def get_photo_url(s3_key):
     
     presigned_url = f"{app_config.S3_ENDPOINT_URL}/{app_config.S3_BUCKET}/{s3_key}"
     return jsonify({'url': presigned_url})
+
+
+@review_bp.route('/photos/<path:s3_key>/raw', methods=['GET'])
+@require_admin
+def stream_photo(s3_key):
+    """Stream the stored photo bytes through the API so the admin SPA can
+    render evidence without direct access to the internal S3/MinIO host."""
+    from flask import Response
+    from .config import config
+    from .upload import get_s3_client
+
+    app_config = config['default']()
+    s3 = get_s3_client()
+    if not s3:
+        return jsonify({'error': 'S3 not configured'}), 503
+
+    try:
+        obj = s3.get_object(Bucket=app_config.S3_BUCKET, Key=s3_key)
+    except Exception:
+        return jsonify({'error': 'Photo not found'}), 404
+
+    data = obj['Body'].read()
+    return Response(data, mimetype=obj.get('ContentType', 'image/jpeg'))

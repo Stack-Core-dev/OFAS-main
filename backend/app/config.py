@@ -34,6 +34,11 @@ class Config:
     MAX_PHOTO_SIZE_MB = int(os.environ.get('MAX_PHOTO_SIZE_MB', 2))
     MAX_PHOTOS_PER_VISIT = int(os.environ.get('MAX_PHOTOS_PER_VISIT', 10))
     MIN_PHOTOS_PER_VISIT = int(os.environ.get('MIN_PHOTOS_PER_VISIT', 3))
+
+    # Offline tolerance: how old a captured visit / trail entry may be when it is
+    # finally synced. Field devices often capture offline and upload hours later.
+    VISIT_MAX_AGE_SECONDS = int(os.environ.get('VISIT_MAX_AGE_SECONDS', 604800))
+    TRAIL_ENTRY_MAX_AGE_SECONDS = int(os.environ.get('TRAIL_ENTRY_MAX_AGE_SECONDS', 604800))
     
     SYNC_BATCH_SIZE = int(os.environ.get('SYNC_BATCH_SIZE', 100))
     VISIT_RETENTION_DAYS = int(os.environ.get('VISIT_RETENTION_DAYS', 365))

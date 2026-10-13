@@ -11,7 +11,7 @@ from .database import get_db
 from .auth import require_surveyor, get_current_user_id
 from .validation import validate_visit_payload
 from .crypto import verify_visit_signature, verify_trail_chain, verify_trail_snapshot
-from .geospatial import validate_visit_location
+from .geospatial import validate_visit_location, validate_point_within_field
 from .audit import create_audit_logger, AUDIT_ACTIONS
 
 sync_bp = Blueprint('sync', __name__, url_prefix='/api/sync')
@@ -29,7 +29,7 @@ def _current_surveyor(db):
 @sync_bp.route('/fields', methods=['GET'])
 @require_surveyor
 def get_assigned_fields():
-    db = next(get_db())
+    db = get_db()
     surveyor = _current_surveyor(db)
     
     if not surveyor:
@@ -76,11 +76,49 @@ def get_assigned_fields():
     })
 
 
+@sync_bp.route('/register-device', methods=['POST'])
+@require_surveyor
+def register_device():
+    """Register (or refresh) this device's signing key for the authenticated
+    surveyor and return the phone UUID used as `phone_id` in visit payloads."""
+    db = get_db()
+    payload = request.get_json() or {}
+    device_id = payload.get('device_id')
+    public_key = payload.get('public_key')
+
+    if not device_id or not public_key:
+        return jsonify({'error': 'device_id and public_key are required'}), 400
+
+    phone = db.query(Phone).filter(Phone.device_id == device_id).first()
+    if phone:
+        if phone.status == PhoneStatus.BLOCKED:
+            return jsonify({'error': 'Device is blocked'}), 403
+        phone.public_key = public_key
+        if payload.get('model'):
+            phone.model = payload.get('model')
+        if payload.get('android_version'):
+            phone.android_version = payload.get('android_version')
+        phone.last_seen = datetime.utcnow()
+    else:
+        phone = Phone(
+            device_id=device_id,
+            model=payload.get('model'),
+            android_version=payload.get('android_version'),
+            public_key=public_key,
+            key_algorithm='ES256',
+            status=PhoneStatus.ACTIVE
+        )
+        db.add(phone)
+
+    db.commit()
+    return jsonify({'phone_id': str(phone.id), 'status': phone.status.value}), 200
+
+
 @sync_bp.route('/submit', methods=['POST'])
 @require_surveyor
 def submit_visit():
     user_id = get_current_user_id()
-    db = next(get_db())
+    db = get_db()
     audit = create_audit_logger(db)
     
     payload = request.get_json()
@@ -116,7 +154,13 @@ def submit_visit():
     
     visit_id_exists = db.query(Visit).filter(Visit.visit_id == payload['visit_id']).first()
     if visit_id_exists:
-        return jsonify({'error': 'Visit ID already exists'}), 409
+        # Idempotent replay: a client may re-send after losing the success response.
+        return jsonify({
+            'success': True,
+            'visit_id': visit_id_exists.visit_id,
+            'server_visit_id': str(visit_id_exists.id),
+            'synced_at': (visit_id_exists.synced_at or datetime.utcnow()).isoformat() + 'Z'
+        }), 200
     
     sig_result = verify_visit_signature(
         type('obj', (object,), payload)(),
@@ -131,6 +175,23 @@ def submit_visit():
     )
     if not location_valid:
         return jsonify({'error': 'Location validation failed', 'details': loc_msg}), 400
+
+    for i, photo in enumerate(payload['field_photos']):
+        photo_valid, _, photo_msg = validate_point_within_field(
+            db, photo['latitude'], photo['longitude'],
+            photo.get('accuracy_meters'), payload['field_id'],
+            label=f"Field photo {i}"
+        )
+        if not photo_valid:
+            return jsonify({'error': 'Evidence location validation failed', 'details': photo_msg}), 400
+
+    selfie_valid, _, selfie_msg = validate_point_within_field(
+        db, payload['selfie_latitude'], payload['selfie_longitude'],
+        payload.get('selfie_accuracy_meters'), payload['field_id'],
+        label="Selfie"
+    )
+    if not selfie_valid:
+        return jsonify({'error': 'Evidence location validation failed', 'details': selfie_msg}), 400
     
     trail_entries = db.query(TrailEntry).filter(
         TrailEntry.phone_id == payload['phone_id']
@@ -184,6 +245,9 @@ def submit_visit():
         bearing=payload.get('bearing'),
         selfie_photo_hash=payload['selfie_photo_hash'],
         selfie_photo_s3_key=payload.get('selfie_photo_s3_key'),
+        selfie_latitude=payload.get('selfie_latitude'),
+        selfie_longitude=payload.get('selfie_longitude'),
+        selfie_accuracy_meters=payload.get('selfie_accuracy_meters'),
         field_photos=payload['field_photos'],
         face_match_score=payload['face_match_score'],
         liveness_verified=payload['liveness_verified'],
@@ -196,13 +260,16 @@ def submit_visit():
     
     db.add(visit)
     db.flush()
-    
+
+    server_visit_id = str(visit.id)
+    synced_at = visit.synced_at
+
     audit.log(
         action='VISIT_SUBMITTED',
         entity_type='visit',
-        entity_id=str(visit.id),
+        entity_id=server_visit_id,
         user_id=get_current_user_id(),
-        visit_id=str(visit.id),
+        visit_id=server_visit_id,
         phone_id=payload['phone_id'],
         new_values={'visit_id': payload['visit_id'], 'status': 'synced'},
         ip_address=request.remote_addr,
@@ -214,15 +281,15 @@ def submit_visit():
     return jsonify({
         'success': True,
         'visit_id': payload['visit_id'],
-        'server_visit_id': str(visit.id),
-        'synced_at': visit.synced_at.isoformat() + 'Z'
+        'server_visit_id': server_visit_id,
+        'synced_at': synced_at.isoformat() + 'Z'
     }), 201
 
 
 @sync_bp.route('/status', methods=['GET'])
 @require_surveyor
 def get_sync_status():
-    db = next(get_db())
+    db = get_db()
     surveyor = _current_surveyor(db)
     
     if not surveyor:

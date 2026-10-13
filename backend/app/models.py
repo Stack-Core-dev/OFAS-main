@@ -165,6 +165,9 @@ class Visit(Base):
     
     selfie_photo_hash = Column(String(64), nullable=False)
     selfie_photo_s3_key = Column(String(255))
+    selfie_latitude = Column(Float)
+    selfie_longitude = Column(Float)
+    selfie_accuracy_meters = Column(Float)
     field_photos = Column(JSONBData, nullable=False, default=list)
     
     face_match_score = Column(Float)

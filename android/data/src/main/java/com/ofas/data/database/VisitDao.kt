@@ -37,6 +37,9 @@ interface VisitDao {
     @Query("SELECT * FROM visits WHERE syncedAt IS NULL AND status IN ('QUEUED', 'SYNCING', 'FAILED') ORDER BY createdAt ASC")
     suspend fun getPendingSync(): List<VisitEntity>
 
+    @Query("SELECT COUNT(*) FROM visits WHERE syncedAt IS NULL AND status IN ('QUEUED', 'SYNCING', 'FAILED')")
+    suspend fun getPendingSyncCount(): Int
+
     @Query("UPDATE visits SET status = 'SYNCING', updatedAt = :updatedAt WHERE id = :id AND status IN ('QUEUED', 'FAILED')")
     suspend fun markSyncing(id: String, updatedAt: Long): Int
 

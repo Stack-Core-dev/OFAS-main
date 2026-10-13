@@ -1,8 +1,9 @@
 import hashlib
 import hmac
 import json
+import math
 import base64
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
@@ -37,6 +38,29 @@ def compute_entry_hash(entry_data: Dict) -> str:
     return sha256(canonical.encode())
 
 
+def _scaled_int(value, scale: int) -> Optional[int]:
+    """Round a float to an integer at a fixed scale using round-half-up.
+
+    Producing integers (instead of floats) makes the canonical serialization
+    byte-identical across Python and Kotlin, which is required because client
+    and server independently compute the same hash.
+    """
+    if value is None:
+        return None
+    return int(math.floor(float(value) * scale + 0.5))
+
+
+def _to_millis(value: datetime) -> int:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(round(value.timestamp() * 1000))
+
+
+def canonical_json(value) -> str:
+    """Deterministic JSON used for hashing/signing on both client and server."""
+    return json.dumps(value, sort_keys=True, separators=(',', ':'))
+
+
 def compute_trail_entry_hash(
     sequence_number: int,
     satellite_timestamp: datetime,
@@ -49,17 +73,17 @@ def compute_trail_entry_hash(
     prev_hash: str
 ) -> str:
     data = {
-        'seq': sequence_number,
-        'time': satellite_timestamp.isoformat() + 'Z',
-        'lat': latitude,
-        'lon': longitude,
-        'acc': accuracy_meters,
-        'alt': altitude,
-        'spd': speed,
-        'brg': bearing,
+        'seq': int(sequence_number),
+        'time': _to_millis(satellite_timestamp),
+        'lat': _scaled_int(latitude, 1_000_000),
+        'lon': _scaled_int(longitude, 1_000_000),
+        'acc': _scaled_int(accuracy_meters, 100),
+        'alt': _scaled_int(altitude, 100),
+        'spd': _scaled_int(speed, 1000),
+        'brg': _scaled_int(bearing, 1000),
         'prev': prev_hash
     }
-    return compute_entry_hash(data)
+    return sha256(canonical_json(data).encode())
 
 
 def verify_trail_chain(entries: List[TrailEntry]) -> VerificationResult:
@@ -104,7 +128,7 @@ def verify_trail_chain(entries: List[TrailEntry]) -> VerificationResult:
 def verify_signature(phone_id: str, signature_b64: str, data_hash: str) -> bool:
     from .database import get_db
     try:
-        db = next(get_db())
+        db = get_db()
         phone = db.query(Phone).filter(Phone.id == phone_id).first()
         if not phone:
             return False
@@ -125,33 +149,72 @@ def verify_signature(phone_id: str, signature_b64: str, data_hash: str) -> bool:
         return False
 
 
-def verify_visit_signature(visit: Visit, phone: Phone) -> VerificationResult:
-    result = VerificationResult(True, [])
-    
-    visit_data = {
-        'visit_id': visit.visit_id,
+def build_visit_signing_payload(visit) -> Dict:
+    """Canonical, integer-scaled representation of a visit payload.
+
+    The field device builds this exact structure to compute the signature, so
+    every float is converted to an integer at a fixed scale to keep the JSON
+    byte-identical between Python and Kotlin.
+    """
+    def photo_entry(photo: Dict) -> Dict:
+        return {
+            'hash': photo.get('hash'),
+            's3_key': photo.get('s3_key'),
+            'timestamp': photo.get('timestamp'),
+            'latitude': _scaled_int(photo.get('latitude'), 1_000_000),
+            'longitude': _scaled_int(photo.get('longitude'), 1_000_000),
+            'accuracy_meters': _scaled_int(photo.get('accuracy_meters'), 100)
+        }
+
+    snapshot = visit.trail_snapshot if isinstance(visit.trail_snapshot, dict) else {}
+    entries = []
+    for entry in snapshot.get('entries_around', []) or []:
+        entries.append({
+            'sequence_number': int(entry.get('sequence_number', 0)),
+            'timestamp': entry.get('timestamp'),
+            'latitude': _scaled_int(entry.get('latitude'), 1_000_000),
+            'longitude': _scaled_int(entry.get('longitude'), 1_000_000),
+            'accuracy_meters': _scaled_int(entry.get('accuracy_meters'), 100),
+            'entry_hash': entry.get('entry_hash'),
+            'prev_hash': entry.get('prev_hash')
+        })
+
+    return {
+        'visit_id': str(visit.visit_id),
         'surveyor_id': str(visit.surveyor_id),
         'field_id': str(visit.field_id),
         'phone_id': str(visit.phone_id),
-        'satellite_timestamp': visit.satellite_timestamp.isoformat() + 'Z',
-        'latitude': visit.latitude,
-        'longitude': visit.longitude,
-        'accuracy_meters': visit.accuracy_meters,
+        'satellite_timestamp': visit.satellite_timestamp,
+        'latitude': _scaled_int(visit.latitude, 1_000_000),
+        'longitude': _scaled_int(visit.longitude, 1_000_000),
+        'accuracy_meters': _scaled_int(visit.accuracy_meters, 100),
         'selfie_photo_hash': visit.selfie_photo_hash,
-        'field_photos': visit.field_photos,
-        'face_match_score': visit.face_match_score,
-        'liveness_verified': visit.liveness_verified,
-        'trail_snapshot': visit.trail_snapshot,
+        'selfie_latitude': _scaled_int(getattr(visit, 'selfie_latitude', None), 1_000_000),
+        'selfie_longitude': _scaled_int(getattr(visit, 'selfie_longitude', None), 1_000_000),
+        'selfie_accuracy_meters': _scaled_int(getattr(visit, 'selfie_accuracy_meters', None), 100),
+        'field_photos': [photo_entry(p) for p in (visit.field_photos or [])],
+        'face_match_score': _scaled_int(visit.face_match_score, 1_000_000),
+        'liveness_verified': bool(visit.liveness_verified),
+        'trail_snapshot': {
+            'prev_entry_hash': snapshot.get('prev_entry_hash'),
+            'next_entry_hash': snapshot.get('next_entry_hash'),
+            'entries_around': entries
+        }
     }
-    
-    canonical = json.dumps(visit_data, sort_keys=True, separators=(',', ':'))
+
+
+def verify_visit_signature(visit: Visit, phone: Phone) -> VerificationResult:
+    result = VerificationResult(True, [])
+
+    visit_data = build_visit_signing_payload(visit)
+    canonical = canonical_json(visit_data)
     data_hash = sha256(canonical.encode())
-    
+
     try:
         public_key_pem = phone.public_key
         public_key = serialization.load_pem_public_key(public_key_pem.encode())
         signature = base64.b64decode(visit.signature)
-        
+
         if phone.key_algorithm == 'ES256':
             public_key.verify(signature, data_hash.encode(), ec.ECDSA(hashes.SHA256()))
         else:
@@ -160,7 +223,7 @@ def verify_visit_signature(visit: Visit, phone: Phone) -> VerificationResult:
         result.add_error("Visit signature verification failed")
     except Exception as e:
         result.add_error(f"Signature verification error: {str(e)}")
-    
+
     return result
 
 
@@ -194,12 +257,18 @@ def verify_trail_snapshot(visit: Visit, db_entries: List[TrailEntry]) -> Verific
             result.add_error("Next trail entry not found in database")
     
     visit_time = visit.satellite_timestamp
+    if isinstance(visit_time, str):
+        visit_time = datetime.fromisoformat(visit_time.replace('Z', '+00:00'))
+    if visit_time.tzinfo is not None:
+        visit_time = visit_time.astimezone(timezone.utc).replace(tzinfo=None)
     entries_around = snapshot.get('entries_around', [])
     if not entries_around:
         result.add_error("No trail entries around visit timestamp")
     else:
         for entry_data in entries_around:
             entry_time = datetime.fromisoformat(entry_data['timestamp'].replace('Z', '+00:00'))
+            if entry_time.tzinfo is not None:
+                entry_time = entry_time.astimezone(timezone.utc).replace(tzinfo=None)
             time_diff = abs((visit_time - entry_time).total_seconds())
             if time_diff > 300:
                 result.add_error(f"Trail entry time gap too large: {time_diff}s")

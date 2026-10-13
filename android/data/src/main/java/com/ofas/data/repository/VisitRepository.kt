@@ -22,6 +22,9 @@ class VisitRepository(private val dao: VisitDao) {
     suspend fun getByStatuses(statuses: List<String>): List<VisitEntity> = dao.getByStatuses(statuses)
 
     suspend fun getPendingSync(): List<VisitEntity> = dao.getPendingSync()
+
+    suspend fun getPendingSyncCount(): Int = dao.getPendingSyncCount()
+
     suspend fun markSyncing(id: String): Int = dao.markSyncing(id, System.currentTimeMillis())
     suspend fun markSynced(id: String, timestamp: Long): Int =
         dao.markSynced(id, timestamp, System.currentTimeMillis())

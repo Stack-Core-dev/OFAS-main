@@ -52,6 +52,6 @@ def client(app):
 def db_session(app):
     from app.database import get_db
     with app.app_context():
-        db = next(get_db())
+        db = get_db()
         yield db
         db.close()

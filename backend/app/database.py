@@ -190,16 +190,15 @@ def init_db(app_config: Config = None):
         connect_args = {}
 
     engine_options = {
-        'pool_pre_ping': True,
+        'pool_pre_ping': not (is_testing or db_uri.startswith('sqlite')),
         'pool_recycle': 3600,
         'echo': app_config.get('SQLALCHEMY_ECHO', False) if hasattr(app_config, 'get') else getattr(app_config, 'SQLALCHEMY_ECHO', False),
         'connect_args': connect_args
     }
-    if is_testing:
+    if is_testing and db_uri.startswith('sqlite'):
         engine_options['poolclass'] = StaticPool
-        if db_uri.startswith('sqlite'):
-            engine_options['connect_args'] = {'check_same_thread': False}
-    else:
+        engine_options['connect_args'] = {'check_same_thread': False}
+    if not is_testing:
         engine_options.update({
             'pool_size': 10,
             'max_overflow': 30,
@@ -231,11 +230,7 @@ def init_db(app_config: Config = None):
 def get_db():
     if SessionLocal is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        SessionLocal.remove()
+    return SessionLocal()
 
 
 @contextmanager

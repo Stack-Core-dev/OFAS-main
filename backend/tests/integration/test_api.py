@@ -47,7 +47,7 @@ def client(app):
 def db_session(app):
     """Database session."""
     with app.app_context():
-        db = next(get_db())
+        db = get_db()
         yield db
         db.close()
 
@@ -56,7 +56,7 @@ def db_session(app):
 def admin_user(app):
     """Create admin user."""
     with app.app_context():
-        db = next(get_db())
+        db = get_db()
         user = User(
             username="admin",
             email="admin@test.com",

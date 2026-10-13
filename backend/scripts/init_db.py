@@ -77,7 +77,7 @@ def create_super_admin():
 
     print(f"Checking for super admin user: {admin_username}")
 
-    db = next(get_db())
+    db = get_db()
     try:
         existing = db.query(User).filter(User.username == admin_username).first()
         if existing:

@@ -97,7 +97,7 @@ def get_current_user() -> Optional[User]:
     try:
         verify_jwt_in_request()
         user_id = get_jwt_identity()
-        db = next(get_db())
+        db = get_db()
         return db.query(User).filter(User.id == user_id, User.is_active == True).first()
     except Exception:
         return None

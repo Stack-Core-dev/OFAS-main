@@ -47,6 +47,24 @@ def validate_coordinates(lat: float, lon: float) -> bool:
     return -90 <= lat <= 90 and -180 <= lon <= 180
 
 
+def _valid_coord_pair(lat, lon) -> bool:
+    """Require a numeric, in-range latitude/longitude pair."""
+    if not isinstance(lat, (int, float)) or isinstance(lat, bool):
+        return False
+    if not isinstance(lon, (int, float)) or isinstance(lon, bool):
+        return False
+    return validate_coordinates(lat, lon)
+
+
+def _valid_optional_accuracy(accuracy, max_accuracy: float = 100.0) -> bool:
+    """Accuracy is optional, but when supplied it must be a sane distance."""
+    if accuracy is None:
+        return True
+    if not isinstance(accuracy, (int, float)) or isinstance(accuracy, bool):
+        return False
+    return validate_accuracy(accuracy, max_accuracy)
+
+
 def validate_accuracy(accuracy: float, max_accuracy: float = 100.0) -> bool:
     return 0 <= accuracy <= max_accuracy
 
@@ -120,8 +138,9 @@ def validate_visit_payload(payload: Dict[str, Any], app_config) -> ValidationRes
     required_fields = [
         'visit_id', 'surveyor_id', 'field_id', 'phone_id',
         'satellite_timestamp', 'latitude', 'longitude', 'accuracy_meters',
-        'selfie_photo_hash', 'field_photos', 'face_match_score',
-        'liveness_verified', 'trail_snapshot', 'signature', 'signed_by_key_id'
+        'selfie_photo_hash', 'selfie_latitude', 'selfie_longitude', 'field_photos',
+        'face_match_score', 'liveness_verified', 'trail_snapshot', 'signature',
+        'signed_by_key_id'
     ]
     
     for field in required_fields:
@@ -140,11 +159,17 @@ def validate_visit_payload(payload: Dict[str, Any], app_config) -> ValidationRes
     if not validate_accuracy(payload['accuracy_meters'], 100.0):
         result.add_error("Accuracy out of acceptable range")
     
-    if not validate_timestamp(payload['satellite_timestamp'], max_age_seconds=3600):
+    if not validate_timestamp(payload['satellite_timestamp'], max_age_seconds=app_config.VISIT_MAX_AGE_SECONDS):
         result.add_error("Satellite timestamp too old or in future")
     
     if not validate_sha256_hash(payload['selfie_photo_hash']):
         result.add_error("Invalid selfie photo hash")
+
+    if not _valid_coord_pair(payload.get('selfie_latitude'), payload.get('selfie_longitude')):
+        result.add_error("Invalid selfie coordinates")
+
+    if not _valid_optional_accuracy(payload.get('selfie_accuracy_meters')):
+        result.add_error("Selfie accuracy out of acceptable range")
     
     if not isinstance(payload['face_match_score'], (int, float)) or \
        not (0 <= payload['face_match_score'] <= 1):
@@ -170,12 +195,18 @@ def validate_visit_payload(payload: Dict[str, Any], app_config) -> ValidationRes
                 continue
             if 'hash' not in photo or not validate_sha256_hash(photo['hash']):
                 result.add_error(f"Photo {i}: invalid hash")
-            if 's3_key' not in photo:
-                result.add_error(f"Photo {i}: missing s3_key")
+            if not _valid_coord_pair(photo.get('latitude'), photo.get('longitude')):
+                result.add_error(f"Photo {i}: invalid or missing coordinates")
+            if not _valid_optional_accuracy(photo.get('accuracy_meters')):
+                result.add_error(f"Photo {i}: accuracy out of acceptable range")
+            # s3_key is optional at submit time: photos may be uploaded after the
+            # visit record exists (the upload endpoint fills in the real key).
+            if 's3_key' in photo and photo['s3_key'] is not None and not isinstance(photo['s3_key'], str):
+                result.add_error(f"Photo {i}: s3_key must be text")
             if 'timestamp' in photo:
                 try:
                     ts = datetime.fromisoformat(photo['timestamp'].replace('Z', '+00:00'))
-                    if not validate_timestamp(ts, max_age_seconds=3600):
+                    if not validate_timestamp(ts, max_age_seconds=app_config.VISIT_MAX_AGE_SECONDS):
                         result.add_error(f"Photo {i}: timestamp too old")
                 except Exception:
                     result.add_error(f"Photo {i}: invalid timestamp format")
@@ -328,7 +359,7 @@ def validate_trail_entry(entry: Dict[str, Any]) -> ValidationResult:
     
     try:
         ts = datetime.fromisoformat(entry['satellite_timestamp'].replace('Z', '+00:00'))
-        if not validate_timestamp(ts, max_age_seconds=86400):
+        if not validate_timestamp(ts, max_age_seconds=config['default']().TRAIL_ENTRY_MAX_AGE_SECONDS):
             result.add_error("satellite_timestamp too old")
     except Exception:
         result.add_error("Invalid satellite_timestamp format")
