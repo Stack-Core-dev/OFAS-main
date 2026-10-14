@@ -7,10 +7,11 @@ import {
   ManagedUser,
   Metrics,
   Surveyor,
+  Phone,
   login,
   logout
 } from "./api";
-import { Actions, DataTable, FaceStatusBadge } from "./lib/ui";
+import { Actions, DataTable, FaceStatusBadge, phoneRows } from "./lib/ui";
 import { Overview } from "./sections/Overview";
 import { VisitDetails } from "./sections/VisitDetails";
 import { SurveyorActivityPanel } from "./components/SurveyorActivity";
@@ -96,13 +97,14 @@ function Dashboard({
   const [surveyors, setSurveyors] = useState<Surveyor[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [phones, setPhones] = useState<Phone[]>([]);
   const [error, setError] = useState("");
   const [pendingVisitId, setPendingVisitId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
-    Promise.allSettled([api.metrics(), api.users(), api.surveyors(), api.fields(), api.assignments()]).then(
-      ([metricsResult, usersResult, surveyorsResult, fieldsResult, assignmentsResult]) => {
+    Promise.allSettled([api.metrics(), api.users(), api.surveyors(), api.fields(), api.assignments(), api.phones()]).then(
+      ([metricsResult, usersResult, surveyorsResult, fieldsResult, assignmentsResult, phonesResult]) => {
         const failures: string[] = [];
         if (metricsResult.status === "fulfilled") setMetrics(metricsResult.value);
         else failures.push("metrics");
@@ -114,6 +116,8 @@ function Dashboard({
         else failures.push("fields");
         if (assignmentsResult.status === "fulfilled") setAssignments(assignmentsResult.value.assignments);
         else failures.push("assignments");
+        if (phonesResult.status === "fulfilled") setPhones(phonesResult.value.phones);
+        else failures.push("phones");
         if (failures.length > 0) setError(`Some dashboard data could not be loaded: ${failures.join(", ")}.`);
       }
     );
@@ -183,6 +187,7 @@ function Dashboard({
         {section === "overview" && (
           <Overview
             metrics={metrics}
+            phones={phones}
             onNavigate={nav}
             onOpenVisit={(visitId) => {
               setPendingVisitId(visitId);
@@ -204,7 +209,9 @@ function Dashboard({
         {section === "visits" && (
           <VisitDetails surveyors={surveyors} fields={fields} initialVisitId={pendingVisitId} />
         )}
-        {section === "surveyors" && <Surveyors surveyors={surveyors} onChanged={(next) => setSurveyors(next)} />}
+        {section === "surveyors" && (
+          <Surveyors surveyors={surveyors} phones={phones} onChanged={(next) => setSurveyors(next)} />
+        )}
         {section === "fields" && (
           <Fields
             fields={fields}
@@ -630,9 +637,11 @@ function Fields({
 
 function Surveyors({
   surveyors,
+  phones,
   onChanged
 }: {
   surveyors: Surveyor[];
+  phones: Phone[];
   onChanged: (surveyors: Surveyor[]) => void;
 }) {
   const [editing, setEditing] = useState<Surveyor | null>(null);
@@ -773,6 +782,21 @@ function Surveyors({
           onClose={() => setTracking(null)}
         />
       )}
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">DEVICES</p>
+            <h3>Registered phones</h3>
+            <p className="muted">Mobile devices registered to the field operation.</p>
+          </div>
+        </div>
+        <DataTable
+          compact
+          title=""
+          headers={["Model", "Device ID", "Android", "Status", "Last seen"]}
+          rows={phoneRows(phones)}
+        />
+      </section>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.ofas.data.model.FieldEntity
 
@@ -42,4 +43,10 @@ interface FieldDao {
 
     @Query("DELETE FROM fields")
     suspend fun deleteAll()
+
+    @Transaction
+    suspend fun replaceAll(fields: List<FieldEntity>) {
+        deleteAll()
+        insertAll(fields)
+    }
 }

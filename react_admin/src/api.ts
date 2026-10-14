@@ -112,6 +112,18 @@ export type Field = {
   created_at: string;
 };
 
+export type Phone = {
+  id: string;
+  device_id: string;
+  model: string | null;
+  android_version: string | null;
+  status: string;
+  registered_at: string;
+  last_seen: string | null;
+  blocked_at: string | null;
+  blocked_reason: string | null;
+};
+
 export type ManagedUser = {
   id: string;
   username: string;
@@ -290,6 +302,7 @@ export const api = {
       body: JSON.stringify({ decision, notes })
     }),
   surveyors: () => request<{ surveyors: Surveyor[] }>("/api/admin/surveyors?per_page=100&active=false"),
+  phones: () => request<{ phones: Phone[]; pagination: Pagination }>("/api/admin/phones?per_page=100"),
   surveyorLocations: (id: string, limit = 200) =>
     request<SurveyorActivity>(`/api/admin/surveyors/${id}/locations?limit=${limit}`),
   fields: () => request<{ fields: Field[] }>("/api/admin/fields?per_page=100"),

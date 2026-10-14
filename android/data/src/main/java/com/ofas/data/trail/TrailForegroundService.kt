@@ -1,11 +1,13 @@
 package com.ofas.data.trail
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -24,12 +26,47 @@ class TrailForegroundService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "ofas_trail_channel"
 
+        @Volatile
+        private var running = false
+
         fun start(context: Context) {
             val intent = Intent(context, TrailForegroundService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
+            }
+        }
+
+        /**
+         * Starts trail recording when allowed to run: within work hours and with
+         * a location permission granted. Callers should invoke this from a context
+         * that is allowed to start a foreground service (app foreground or a
+         * BOOT_COMPLETED receiver); background starts are rejected by the OS.
+         * Never throws - a rejected start is logged and retried on the next trigger.
+         */
+        fun startIfEligible(context: Context) {
+            if (running) {
+                Log.i(TAG, "startIfEligible: already running")
+                return
+            }
+            if (!TrailWorkHours.isWithinWorkHours()) {
+                Log.i(TAG, "startIfEligible: outside work hours, skipping")
+                return
+            }
+            val fine = context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+            val coarse = context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+            if (!fine && !coarse) {
+                Log.i(TAG, "startIfEligible: no location permission, skipping")
+                return
+            }
+            try {
+                start(context)
+                Log.i(TAG, "startIfEligible: requested trail recording start")
+            } catch (e: Exception) {
+                Log.w(TAG, "startIfEligible: unable to start now; will retry on next trigger", e)
             }
         }
 
@@ -60,6 +97,7 @@ class TrailForegroundService : Service() {
         }
         trailManager.startRecording()
         uploadPendingLocations()
+        running = true
         Log.i(TAG, "Trail recording started")
     }
 
@@ -74,6 +112,7 @@ class TrailForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
         if (::trailManager.isInitialized) {
             trailManager.stopRecording()
             trailManager.onEntryRecorded = null

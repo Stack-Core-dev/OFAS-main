@@ -29,6 +29,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,7 +74,19 @@ fun FieldSelectionScreen(
     Column(
         modifier = Modifier.fillMaxSize().padding(16.dp)
     ) {
-        Text("Select Field", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Select Field", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            OutlinedButton(
+                onClick = { viewModel.refresh() },
+                modifier = Modifier.height(36.dp)
+            ) {
+                Text("Refresh", fontSize = 13.sp)
+            }
+        }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = if (fields.isEmpty()) "No assigned fields are available offline"

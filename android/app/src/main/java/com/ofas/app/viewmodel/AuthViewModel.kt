@@ -124,15 +124,19 @@ class AuthViewModel @Inject constructor(
         val authHeader = authRepository.getAuthHeader() ?: return false
         return try {
             val response = apiService.getAssignedFields(authHeader)
-            if (!response.isSuccessful || response.body() == null) return false
+            if (!response.isSuccessful || response.body() == null) {
+                val msg = response.message().ifBlank { "Failed to sync assigned fields" }
+                _error.value = "Field sync failed: $msg"
+                return false
+            }
             val syncResponse = response.body()!!
             val fields = syncResponse.fields.map { it.toEntity() }
             fieldRepository.replaceAssignedFields(fields)
-            // Persist surveyor identity and face templates from the sync response
             authRepository.saveSurveyorId(syncResponse.surveyorId)
             authRepository.saveFaceTemplates(syncResponse.faceTemplates)
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            _error.value = "Field sync error: ${e.message ?: "unknown error"}"
             false
         }
     }

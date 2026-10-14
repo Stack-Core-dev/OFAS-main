@@ -1,17 +1,29 @@
 package com.ofas.data.repository
 
+import android.util.Log
 import com.ofas.data.database.FieldDao
 import com.ofas.data.model.FieldEntity
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 
 class FieldRepository(private val dao: FieldDao) {
+
+    companion object {
+        private const val TAG = "FieldRepository"
+    }
 
     suspend fun insertAll(fields: List<FieldEntity>) = dao.insertAll(fields)
 
     suspend fun replaceAssignedFields(fields: List<FieldEntity>) {
-        dao.deleteAll()
-        if (fields.isNotEmpty()) dao.insertAll(fields)
+        if (fields.isEmpty()) {
+            Log.w(TAG, "replaceAssignedFields called with empty list - keeping existing data")
+            return
+        }
+        try {
+            dao.replaceAll(fields)
+            Log.d(TAG, "replaceAssignedFields: stored ${fields.size} fields")
+        } catch (e: Exception) {
+            Log.e(TAG, "replaceAssignedFields failed", e)
+            throw e
+        }
     }
 
     suspend fun insert(field: FieldEntity) = dao.insert(field)

@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from flask import Blueprint, request, jsonify, g
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
+from sqlalchemy.exc import IntegrityError
 
 from .models import (
     User, Surveyor, Field, Assignment, Visit, TrailEntry, Phone, PhoneStatus, VisitStatus,
@@ -346,6 +347,9 @@ def upload_surveyor_location():
     if device_id:
         phone = db.query(Phone).filter(Phone.device_id == device_id).first()
 
+    surveyor_id = surveyor.id
+    phone_id = phone.id if phone else None
+
     stored = 0
     skipped = 0
     errors = []
@@ -362,7 +366,7 @@ def upload_surveyor_location():
             continue
 
         exists = db.query(SurveyorLocation).filter(
-            SurveyorLocation.surveyor_id == surveyor.id,
+            SurveyorLocation.surveyor_id == surveyor_id,
             SurveyorLocation.recorded_at == recorded_at
         ).first()
         if exists:
@@ -370,8 +374,8 @@ def upload_surveyor_location():
             continue
 
         db.add(SurveyorLocation(
-            surveyor_id=surveyor.id,
-            phone_id=phone.id if phone else None,
+            surveyor_id=surveyor_id,
+            phone_id=phone_id,
             device_id=device_id,
             recorded_at=recorded_at,
             latitude=latitude,
@@ -382,13 +386,21 @@ def upload_surveyor_location():
             bearing=ping.get('bearing'),
             source=ping.get('source') or 'trail'
         ))
-        stored += 1
+        try:
+            db.commit()
+            stored += 1
+        except IntegrityError:
+            # A concurrent upload of the same ping (e.g. the foreground service
+            # and the background sync worker racing) already inserted it.
+            db.rollback()
+            skipped += 1
 
     if phone:
         phone.last_seen = datetime.utcnow()
-
-    if stored or phone:
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
 
     return jsonify({
         'success': True,

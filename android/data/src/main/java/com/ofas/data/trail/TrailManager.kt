@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
@@ -29,6 +30,8 @@ class TrailManager private constructor(
     companion object {
         // Temporary field-test cadence; production cadence is 5 minutes.
         private const val TRAIL_INTERVAL_SECONDS = 30
+        private const val LOCATION_TIMEOUT_MS = 15_000L
+        private const val LOCATION_FALLBACK_MS = 5_000L
         private const val TAG = "TrailManager"
         private var INSTANCE: TrailManager? = null
 
@@ -146,13 +149,20 @@ class TrailManager private constructor(
         }
 
         return try {
-            val location = LocationServices.getFusedLocationProviderClient(context)
-                .getCurrentLocation(
+            val client = LocationServices.getFusedLocationProviderClient(context)
+            val cancellation = CancellationTokenSource()
+            val current = withTimeoutOrNull(LOCATION_TIMEOUT_MS) {
+                client.getCurrentLocation(
                     Priority.PRIORITY_HIGH_ACCURACY,
-                    CancellationTokenSource().token
-                )
-                .await()
-            location?.takeUnless { it.isMock }
+                    cancellation.token
+                ).await()
+            }
+            if (current == null) {
+                cancellation.cancel()
+                Log.i(TAG, "No fresh fix within ${LOCATION_TIMEOUT_MS}ms; using last known location")
+            }
+            (current ?: withTimeoutOrNull(LOCATION_FALLBACK_MS) { client.lastLocation.await() })
+                ?.takeUnless { it.isMock }
         } catch (e: Exception) {
             Log.e(TAG, "Unable to obtain current GNSS location", e)
             null

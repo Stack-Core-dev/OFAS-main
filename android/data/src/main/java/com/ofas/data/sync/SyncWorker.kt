@@ -14,6 +14,7 @@ import com.google.gson.reflect.TypeToken
 import com.ofas.data.database.OFASDatabase
 import com.ofas.data.model.VisitEntity
 import com.ofas.data.repository.VisitRepository
+import com.ofas.data.trail.SurveyorLocationUploader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
@@ -109,6 +110,14 @@ class SyncWorker(
                 Log.e(TAG, "Visit ${visit.visitId} sync failed", error)
             }
         }
+
+        // Flush any trail location pings captured while offline (e.g. when the
+        // trail foreground service was not running). Safe to run alongside the
+        // service: the backend dedupes on (surveyor_id, recorded_at).
+        if (!SurveyorLocationUploader.uploadPending(applicationContext)) {
+            retry = true
+        }
+
         if (retry) Result.retry() else Result.success()
     }
 

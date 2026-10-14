@@ -1,11 +1,10 @@
 package com.ofas.app
 
-import android.Manifest
 import android.app.Application
 import android.content.Context
-import android.content.pm.PackageManager
-import android.util.Log
-import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.ofas.data.database.OFASDatabase
 import com.ofas.data.repository.FieldRepository
 import com.ofas.data.repository.SurveyorRepository
@@ -13,7 +12,6 @@ import com.ofas.data.repository.VisitRepository
 import com.ofas.data.sync.SyncWorker
 import com.ofas.data.sync.NetworkStatusMonitor
 import com.ofas.data.trail.TrailForegroundService
-import com.ofas.data.trail.TrailWorkHours
 import com.ofas.security.keystore.KeyManager
 import com.ofas.data.trail.TrailManager
 import com.ofas.data.face.FaceVerifier
@@ -30,28 +28,27 @@ class OFASApplication : Application() {
         FaceVerifier.initialize(this, KeyManager.getInstance(this))
         SyncWorker.schedulePeriodicSync(this)
         NetworkStatusMonitor.initialize(this)
-        startTrailRecordingIfEligible()
+        observeAppForeground()
     }
 
-    private fun startTrailRecordingIfEligible() {
-        if (!TrailWorkHours.isWithinWorkHours()) return
-        val hasLocation = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        if (!hasLocation) return
-        try {
-            TrailForegroundService.start(this)
-        } catch (e: Exception) {
-            Log.w(TAG, "Unable to start trail recording", e)
-        }
+    /**
+     * A foreground-service start is only permitted while the app is in the
+     * foreground (or from an exempted context such as BOOT_COMPLETED). Starting
+     * it from [onCreate] fails when the process is launched in the background,
+     * so start it the moment the app first becomes visible instead. The service
+     * runs with START_STICKY and persists once started.
+     */
+    private fun observeAppForeground() {
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_START) {
+                    TrailForegroundService.startIfEligible(this)
+                }
+            }
+        )
     }
 
     companion object {
-        private const val TAG = "OFASApplication"
         private var _database: OFASDatabase? = null
 
         val database: OFASDatabase
