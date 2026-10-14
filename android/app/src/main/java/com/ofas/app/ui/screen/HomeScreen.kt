@@ -1,5 +1,10 @@
 package com.ofas.app.ui.screen
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,13 +46,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ofas.app.viewmodel.AuthViewModel
 import com.ofas.app.viewmodel.HomeViewModel
+import com.ofas.data.trail.TrailForegroundService
+import com.ofas.data.trail.TrailWorkHours
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,9 +74,36 @@ fun HomeScreen(
     val isSyncing by viewModel.isSyncing.collectAsStateWithLifecycle()
     val syncStatusText by viewModel.syncStatusText.collectAsStateWithLifecycle("Ready")
     val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle(0)
+    val isOnline by viewModel.isOnline.collectAsStateWithLifecycle(true)
+    val todayCount by viewModel.todayCount.collectAsStateWithLifecycle(0)
+    val syncedToday by viewModel.syncedToday.collectAsStateWithLifecycle(0)
+
+    val context = LocalContext.current
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        startLocationTracking(context)
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refresh()
+        val hasLocation = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasLocation) {
+            startLocationTracking(context)
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
     }
 
     Column(
@@ -75,6 +111,13 @@ fun HomeScreen(
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
     ) {
+        SyncStatusBanner(
+            isOnline = isOnline,
+            isSyncing = isSyncing,
+            pendingCount = pendingCount,
+            statusText = syncStatusText
+        )
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -148,7 +191,7 @@ fun HomeScreen(
                 ) {
                     StatCard(
                         title = "Today",
-                        value = "3",
+                        value = todayCount.toString(),
                         icon = Icons.Default.CheckCircle
                     )
                     StatCard(
@@ -158,7 +201,7 @@ fun HomeScreen(
                     )
                     StatCard(
                         title = "Synced",
-                        value = "1",
+                        value = syncedToday.toString(),
                         icon = Icons.Default.Add
                     )
                 }
@@ -188,7 +231,7 @@ fun HomeScreen(
             )
 
             ActionCard(
-                title = "Sync Data",
+                title = "Sync Status",
                 subtitle = syncStatusText,
                 icon = if (isSyncing) Icons.Default.Refresh else Icons.Default.Add,
                 containerColor = if (isSyncing) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
@@ -225,6 +268,90 @@ fun HomeScreen(
                     authViewModel.logout()
                     onLoggedOut()
                 }
+            )
+        }
+    }
+}
+
+@Composable
+private fun SyncStatusBanner(
+    isOnline: Boolean,
+    isSyncing: Boolean,
+    pendingCount: Int,
+    statusText: String
+) {
+    val containerColor: Color
+    val contentColor: Color
+    val icon: ImageVector
+    val title: String
+    val subtitle: String
+
+    when {
+        isSyncing -> {
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            icon = Icons.Default.Refresh
+            title = "Syncing field data"
+            subtitle = if (pendingCount > 0) "$pendingCount visit(s) uploading..." else statusText
+        }
+        !isOnline -> {
+            containerColor = MaterialTheme.colorScheme.errorContainer
+            contentColor = MaterialTheme.colorScheme.onErrorContainer
+            icon = Icons.Default.Warning
+            title = "You're offline"
+            subtitle = if (pendingCount > 0)
+                "$pendingCount visit(s) will sync automatically when you reconnect"
+            else "Saved data will sync automatically when you reconnect"
+        }
+        pendingCount > 0 -> {
+            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+            icon = Icons.Default.Warning
+            title = "$pendingCount visit(s) pending"
+            subtitle = "Waiting to sync..."
+        }
+        else -> {
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            icon = Icons.Default.CheckCircle
+            title = "All data synced"
+            subtitle = "Everything is up to date"
+        }
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(containerColor)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isSyncing) {
+            CircularProgressIndicator(
+                color = contentColor,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(20.dp)
+            )
+        } else {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = contentColor,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            androidx.compose.material3.Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = contentColor
+            )
+            androidx.compose.material3.Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = contentColor.copy(alpha = 0.8f)
             )
         }
     }
@@ -329,5 +456,13 @@ private fun ActionCard(
                 )
             }
         }
+    }
+}
+
+private fun startLocationTracking(context: Context) {
+    if (!TrailWorkHours.isWithinWorkHours()) return
+    try {
+        TrailForegroundService.start(context)
+    } catch (_: Exception) {
     }
 }

@@ -27,7 +27,8 @@ class TrailManager private constructor(
 ) {
 
     companion object {
-        private const val TRAIL_INTERVAL_MINUTES = 5
+        // Temporary field-test cadence; production cadence is 5 minutes.
+        private const val TRAIL_INTERVAL_SECONDS = 30
         private const val TAG = "TrailManager"
         private var INSTANCE: TrailManager? = null
 
@@ -59,9 +60,16 @@ class TrailManager private constructor(
     private var lastEntryHash = "0".repeat(64)
     private val scope = CoroutineScope(Dispatchers.IO)
 
+    /** Invoked after a new entry is persisted, so the pings can be uploaded. */
+    var onEntryRecorded: ((TrailEntryEntity) -> Unit)? = null
+
     fun startRecording() {
-        if (isRecording) return
+        if (isRecording) {
+            Log.i(TAG, "startRecording ignored: already recording")
+            return
+        }
         isRecording = true
+        Log.i(TAG, "startRecording: cadence=${TRAIL_INTERVAL_SECONDS}s")
         loadLastEntry()
         scheduleNextRecording()
     }
@@ -73,7 +81,8 @@ class TrailManager private constructor(
             val entry = createTrailEntry(it)
             database.trailEntryDao().insert(entry)
             lastEntryHash = entry.entryHash
-            Log.d(TAG, "Recorded trail entry #$currentSequence (on demand)")
+            Log.i(TAG, "Recorded trail entry #$currentSequence (on demand)")
+            onEntryRecorded?.invoke(entry)
             entry
         }
     }
@@ -94,23 +103,31 @@ class TrailManager private constructor(
 
     private fun scheduleNextRecording() {
         scope.launch {
+            Log.i(TAG, "Recording loop started (every ${TRAIL_INTERVAL_SECONDS}s)")
             while (isRecording) {
                 recordTrailEntry()
-                delay(TimeUnit.MINUTES.toMillis(TRAIL_INTERVAL_MINUTES.toLong()))
+                delay(TimeUnit.SECONDS.toMillis(TRAIL_INTERVAL_SECONDS.toLong()))
             }
+            Log.i(TAG, "Recording loop stopped")
         }
     }
 
     private fun recordTrailEntry() {
         scope.launch {
-            val location = getCurrentLocation()
-            location?.let {
-                currentSequence++
-                val entry = createTrailEntry(it)
-                database.trailEntryDao().insert(entry)
-                lastEntryHash = entry.entryHash
-                Log.d(TAG, "Recorded trail entry #$currentSequence")
+            if (!TrailWorkHours.isWithinWorkHours()) {
+                Log.i(TAG, "Skipping trail entry: outside work hours (09:00-18:00), now=${java.time.LocalTime.now()}")
+                return@launch
             }
+            val location = getCurrentLocation() ?: run {
+                Log.i(TAG, "Skipping trail entry: no location fix available")
+                return@launch
+            }
+            currentSequence++
+            val entry = createTrailEntry(location)
+            database.trailEntryDao().insert(entry)
+            lastEntryHash = entry.entryHash
+            Log.i(TAG, "Recorded trail entry #$currentSequence lat=${location.latitude} lon=${location.longitude} acc=${location.accuracy} ts=${entry.satelliteTimestamp}")
+            onEntryRecorded?.invoke(entry)
         }
     }
 

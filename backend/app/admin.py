@@ -3,12 +3,12 @@ import re
 from typing import List, Optional
 from flask import Blueprint, request, jsonify, g
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, desc
+from sqlalchemy import func, or_, desc, and_
 from sqlalchemy.exc import IntegrityError
 
 from .models import (
-    User, Surveyor, Field, Phone, Assignment, Visit,
-    UserRole, PhoneStatus, VisitStatus
+    User, Surveyor, Field, Assignment, Visit, Phone, AuditLog, TrailEntry,
+    UserRole, PhoneStatus, VisitStatus, SurveyorLocation
 )
 from .database import get_db
 from .auth import require_admin, require_super_admin, get_current_user_id, hash_password, verify_password
@@ -220,6 +220,23 @@ def list_surveyors():
     total = query.count()
     surveyors = query.order_by(Surveyor.created_at.desc()).offset((page-1)*per_page).limit(per_page).all()
     
+    # Get last location sync times for these surveyors
+    surveyor_ids = [s.id for s in surveyors]
+    last_locations = {}
+    if surveyor_ids:
+        # Get the most recent recorded_at per surveyor
+        subq = db.query(
+            SurveyorLocation.surveyor_id,
+            func.max(SurveyorLocation.recorded_at).label('last_recorded_at')
+        ).filter(SurveyorLocation.surveyor_id.in_(surveyor_ids)).group_by(SurveyorLocation.surveyor_id).subquery()
+        last_loc_rows = db.query(SurveyorLocation).join(
+            subq,
+            and_(SurveyorLocation.surveyor_id == subq.c.surveyor_id,
+                 SurveyorLocation.recorded_at == subq.c.last_recorded_at)
+        ).all()
+        for loc in last_loc_rows:
+            last_locations[str(loc.surveyor_id)] = loc.recorded_at
+    
     return jsonify({
         'surveyors': [{
             'id': str(s.id),
@@ -231,9 +248,59 @@ def list_surveyors():
             'face_template_version': s.face_template_version,
             'face_template_updated_at': s.updated_at.isoformat() + 'Z' if s.face_template and s.updated_at else None,
             'is_active': s.is_active,
-            'created_at': s.created_at.isoformat() + 'Z'
+            'created_at': s.created_at.isoformat() + 'Z',
+            'last_location_sync_at': last_locations.get(str(s.id)).isoformat() + 'Z' if last_locations.get(str(s.id)) else None
         } for s in surveyors],
         'pagination': {'page': page, 'per_page': per_page, 'total': total}
+    })
+
+
+@admin_bp.route('/surveyors/<surveyor_id>/locations', methods=['GET'])
+@require_admin
+def get_surveyor_locations(surveyor_id):
+    """Return a surveyor's recent location pings for live tracking."""
+    db = get_db()
+    surveyor = db.query(Surveyor).filter(Surveyor.id == surveyor_id).first()
+    if not surveyor:
+        return jsonify({'error': 'Surveyor not found'}), 404
+
+    limit = min(request.args.get('limit', 200, type=int), 1000)
+    recent = db.query(SurveyorLocation).filter(
+        SurveyorLocation.surveyor_id == surveyor.id
+    ).order_by(SurveyorLocation.recorded_at.desc()).limit(limit).all()
+
+    # Chronological order makes it easy to draw the travelled track.
+    locations = list(reversed(recent))
+    latest = recent[0] if recent else None
+
+    return jsonify({
+        'surveyor': {
+            'id': str(surveyor.id),
+            'employee_id': surveyor.employee_id,
+            'full_name': surveyor.full_name,
+        },
+        'count': len(locations),
+        'last_sync_at': latest.recorded_at.isoformat() + 'Z' if latest else None,
+        'latest': {
+            'recorded_at': latest.recorded_at.isoformat() + 'Z',
+            'latitude': latest.latitude,
+            'longitude': latest.longitude,
+            'accuracy_meters': latest.accuracy_meters,
+            'source': latest.source,
+        } if latest else None,
+        'locations': [{
+            'id': str(row.id),
+            'recorded_at': row.recorded_at.isoformat() + 'Z',
+            'latitude': row.latitude,
+            'longitude': row.longitude,
+            'accuracy_meters': row.accuracy_meters,
+            'altitude': row.altitude,
+            'speed': row.speed,
+            'bearing': row.bearing,
+            'source': row.source,
+            'device_id': row.device_id,
+        } for row in locations],
+        'pagination': {'limit': limit, 'total': len(locations)},
     })
 
 

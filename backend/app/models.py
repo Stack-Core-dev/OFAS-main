@@ -228,6 +228,36 @@ class TrailEntry(Base):
     def __repr__(self):
         return f"<TrailEntry {self.phone_id} #{self.sequence_number}>"
 
+class SurveyorLocation(Base):
+    __tablename__ = 'surveyor_locations'
+
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    surveyor_id = Column(GUID, ForeignKey('surveyors.id', ondelete='CASCADE'), nullable=False, index=True)
+    phone_id = Column(GUID, ForeignKey('phones.id', ondelete='SET NULL'))
+    device_id = Column(String(100), index=True)
+
+    recorded_at = Column(DateTime, nullable=False, index=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    accuracy_meters = Column(Float)
+    altitude = Column(Float)
+    speed = Column(Float)
+    bearing = Column(Float)
+    source = Column(String(50), default='trail', nullable=False)
+
+    received_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    surveyor = relationship("Surveyor")
+
+    __table_args__ = (
+        UniqueConstraint('surveyor_id', 'recorded_at', name='uq_surveyor_location_time'),
+        Index('idx_surveyor_locations_surveyor_time', 'surveyor_id', 'recorded_at'),
+        Index('idx_surveyor_locations_received', 'received_at'),
+    )
+
+    def __repr__(self):
+        return f"<SurveyorLocation {self.surveyor_id} @ {self.recorded_at}>"
+
 class AuditLog(Base):
     __tablename__ = 'audit_log'
     

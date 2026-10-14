@@ -93,6 +93,7 @@ class AuthViewModel @Inject constructor(
                     _authState.value = AuthState.Unauthenticated
                 }
             } catch (e: Exception) {
+                android.util.Log.e("AuthViewModel", "login failed", e)
                 _error.value = "Network error: ${e.message ?: "unable to contact server"}"
                 _authState.value = AuthState.Unauthenticated
             } finally {

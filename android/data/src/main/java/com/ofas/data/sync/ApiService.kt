@@ -24,6 +24,12 @@ interface ApiService {
     @GET("api/sync/status")
     suspend fun getSyncStatus(@Header("Authorization") authHeader: String): Response<SyncStatusResponse>
 
+    @POST("api/sync/location")
+    suspend fun uploadLocationPings(
+        @Header("Authorization") authHeader: String,
+        @Body request: LocationPingRequest
+    ): Response<LocationPingResponse>
+
     @POST("api/auth/login")
     suspend fun login(@Body request: LoginRequest): Response<LoginResponse>
 
@@ -115,64 +121,91 @@ data class FaceTemplateData(
 )
 
 data class SubmitVisitRequest(
-    val visitId: String,
-    val surveyorId: String,
-    val fieldId: String,
-    val phoneId: String,
-    val satelliteTimestamp: String,
+    @Json(name = "visit_id") val visitId: String,
+    @Json(name = "surveyor_id") val surveyorId: String,
+    @Json(name = "field_id") val fieldId: String,
+    @Json(name = "phone_id") val phoneId: String,
+    @Json(name = "satellite_timestamp") val satelliteTimestamp: String,
     val latitude: Double,
     val longitude: Double,
-    val accuracyMeters: Double,
+    @Json(name = "accuracy_meters") val accuracyMeters: Double,
     val altitude: Double?,
     val speed: Double?,
     val bearing: Double?,
-    val selfiePhotoHash: String,
-    val selfiePhotoS3Key: String?,
-    val fieldPhotos: List<PhotoData>,
-    val faceMatchScore: Float,
-    val livenessVerified: Boolean,
-    val trailSnapshot: TrailSnapshot,
+    @Json(name = "selfie_photo_hash") val selfiePhotoHash: String,
+    @Json(name = "selfie_photo_s3_key") val selfiePhotoS3Key: String?,
+    @Json(name = "selfie_latitude") val selfieLatitude: Double?,
+    @Json(name = "selfie_longitude") val selfieLongitude: Double?,
+    @Json(name = "selfie_accuracy_meters") val selfieAccuracyMeters: Double?,
+    @Json(name = "field_photos") val fieldPhotos: List<PhotoData>,
+    @Json(name = "face_match_score") val faceMatchScore: Float,
+    @Json(name = "liveness_verified") val livenessVerified: Boolean,
+    @Json(name = "trail_snapshot") val trailSnapshot: TrailSnapshot,
     val signature: String,
-    val signedByKeyId: String
+    @Json(name = "signed_by_key_id") val signedByKeyId: String
 )
 
 data class PhotoData(
     val hash: String,
-    val s3Key: String? = null,
+    @Json(name = "s3_key") val s3Key: String? = null,
     val timestamp: String?,
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val accuracyMeters: Double? = null
+    @Json(name = "accuracy_meters") val accuracyMeters: Double? = null
 )
 
 data class TrailSnapshot(
-    val prevEntryHash: String,
-    val nextEntryHash: String,
-    val entriesAround: List<TrailEntryData>
+    @Json(name = "prev_entry_hash") val prevEntryHash: String,
+    @Json(name = "next_entry_hash") val nextEntryHash: String,
+    @Json(name = "entries_around") val entriesAround: List<TrailEntryData>
 )
 
 data class TrailEntryData(
-    val sequenceNumber: Int,
+    @Json(name = "sequence_number") val sequenceNumber: Int,
     val timestamp: String,
     val latitude: Double,
     val longitude: Double,
-    val accuracyMeters: Double,
-    val entryHash: String,
-    val prevHash: String,
+    @Json(name = "accuracy_meters") val accuracyMeters: Double,
+    @Json(name = "entry_hash") val entryHash: String,
+    @Json(name = "prev_hash") val prevHash: String,
     val signature: String? = null
 )
 
 data class SubmitVisitResponse(
     val success: Boolean,
-    val visitId: String,
-    val serverVisitId: String,
-    val syncedAt: String
+    @Json(name = "visit_id") val visitId: String,
+    @Json(name = "server_visit_id") val serverVisitId: String,
+    @Json(name = "synced_at") val syncedAt: String
 )
 
 data class SyncStatusResponse(
-    val pendingCount: Int,
-    val syncedToday: Int,
-    val serverTime: String
+    @Json(name = "pending_count") val pendingCount: Int,
+    @Json(name = "synced_today") val syncedToday: Int,
+    @Json(name = "server_time") val serverTime: String
+)
+
+data class LocationPingRequest(
+    @Json(name = "device_id") val deviceId: String,
+    val pings: List<LocationPing>
+)
+
+data class LocationPing(
+    @Json(name = "recorded_at") val recordedAt: String,
+    val latitude: Double,
+    val longitude: Double,
+    @Json(name = "accuracy_meters") val accuracyMeters: Double? = null,
+    val altitude: Double? = null,
+    val speed: Double? = null,
+    val bearing: Double? = null,
+    val source: String = "trail"
+)
+
+data class LocationPingResponse(
+    val success: Boolean,
+    val received: Int,
+    val stored: Int,
+    val skipped: Int,
+    val errors: List<String> = emptyList()
 )
 
 data class LoginRequest(

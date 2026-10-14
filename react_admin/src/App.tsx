@@ -1,31 +1,35 @@
-import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { api, Assignment, currentSession, Field, ManagedUser, Metrics, photoObjectUrl, Surveyor, Visit, VisitDetail, login, logout } from "./api";
+import { FormEvent, useEffect, useState } from "react";
+import {
+  api,
+  Assignment,
+  currentSession,
+  Field,
+  ManagedUser,
+  Metrics,
+  Surveyor,
+  login,
+  logout
+} from "./api";
+import { Actions, DataTable, FaceStatusBadge } from "./lib/ui";
+import { Overview } from "./sections/Overview";
+import { VisitDetails } from "./sections/VisitDetails";
+import { SurveyorActivityPanel } from "./components/SurveyorActivity";
 
 type Section = "overview" | "users" | "visits" | "surveyors" | "fields" | "assignments";
-
-type StatusTone = "valid" | "invalid" | "flagged" | "pending";
-
-function statusOf(visit: { review_status?: string | null; status?: string | null }): { label: string; tone: StatusTone } {
-  const value = (visit.review_status ?? visit.status ?? "").toLowerCase();
-  if (value === "valid") return { label: "Valid", tone: "valid" };
-  if (value === "invalid") return { label: "Invalid", tone: "invalid" };
-  if (value === "flagged") return { label: "Flagged", tone: "flagged" };
-  return { label: "Pending", tone: "pending" };
-}
-
-function shortId(id: string | null | undefined): string {
-  return id ? `#${id.slice(0, 8).toUpperCase()}` : "—";
-}
-
-function StatusBadge({ visit }: { visit: { review_status?: string | null; status?: string | null } }) {
-  const { label, tone } = statusOf(visit);
-  return <span className={`status-badge ${tone}`}>{label}</span>;
-}
 
 export function App() {
   const [session, setSession] = useState(currentSession());
   if (!session) return <Login onLoggedIn={() => setSession(currentSession())} />;
-  return <Dashboard username={session.user.username} role={session.user.role} onLogout={() => { logout(); setSession(null); }} />;
+  return (
+    <Dashboard
+      username={session.user.username}
+      role={session.user.role}
+      onLogout={() => {
+        logout();
+        setSession(null);
+      }}
+    />
+  );
 }
 
 function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
@@ -48,40 +52,62 @@ function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
     }
   }
 
-  return <main className="login-shell">
-    <form className="login-card" onSubmit={submit}>
-      <img className="brand-logo login-logo" src="/as-logo.jpg" alt="Army Welfare Trust logo" />
-      <p className="eyebrow">FIELD ACTIVITY VERIFICATION</p>
-      <h1>OFAS Admin</h1>
-      <p className="muted">Review evidence and manage field operations.</p>
-      <label>Username<input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" /></label>
-      <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" /></label>
-      {error && <div className="error">{error}</div>}
-      <button className="primary wide" disabled={busy}>{busy ? "Signing in..." : "Sign in"}</button>
-    </form>
-  </main>;
+  return (
+    <main className="login-shell">
+      <form className="login-card" onSubmit={submit}>
+        <img className="brand-logo login-logo" src="/as-logo.jpg" alt="Army Welfare Trust logo" />
+        <p className="eyebrow">FIELD ACTIVITY VERIFICATION</p>
+        <h1>OFAS Admin</h1>
+        <p className="muted">Review evidence and manage field operations.</p>
+        <label>
+          Username
+          <input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
+        </label>
+        <label>
+          Password
+          <input
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            type="password"
+            autoComplete="current-password"
+          />
+        </label>
+        {error && <div className="error">{error}</div>}
+        <button className="primary wide" disabled={busy}>
+          {busy ? "Signing in..." : "Sign in"}
+        </button>
+      </form>
+    </main>
+  );
 }
 
-function Dashboard({ username, role, onLogout }: { username: string; role: string; onLogout: () => void }) {
+function Dashboard({
+  username,
+  role,
+  onLogout
+}: {
+  username: string;
+  role: string;
+  onLogout: () => void;
+}) {
   const [section, setSection] = useState<Section>("overview");
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [users, setUsers] = useState<ManagedUser[]>([]);
-  const [visits, setVisits] = useState<Visit[]>([]);
   const [surveyors, setSurveyors] = useState<Surveyor[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [error, setError] = useState("");
+  const [pendingVisitId, setPendingVisitId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   useEffect(() => {
-    Promise.allSettled([api.metrics(), api.users(), api.visits({ per_page: 100 }), api.surveyors(), api.fields(), api.assignments()])
-      .then(([metricsResult, usersResult, visitsResult, surveyorsResult, fieldsResult, assignmentsResult]) => {
+    Promise.allSettled([api.metrics(), api.users(), api.surveyors(), api.fields(), api.assignments()]).then(
+      ([metricsResult, usersResult, surveyorsResult, fieldsResult, assignmentsResult]) => {
         const failures: string[] = [];
         if (metricsResult.status === "fulfilled") setMetrics(metricsResult.value);
         else failures.push("metrics");
         if (usersResult.status === "fulfilled") setUsers(usersResult.value.users);
         else failures.push("users");
-        if (visitsResult.status === "fulfilled") setVisits(visitsResult.value.visits);
-        else failures.push("visits");
         if (surveyorsResult.status === "fulfilled") setSurveyors(surveyorsResult.value.surveyors);
         else failures.push("surveyors");
         if (fieldsResult.status === "fulfilled") setFields(fieldsResult.value.fields);
@@ -89,38 +115,131 @@ function Dashboard({ username, role, onLogout }: { username: string; role: strin
         if (assignmentsResult.status === "fulfilled") setAssignments(assignmentsResult.value.assignments);
         else failures.push("assignments");
         if (failures.length > 0) setError(`Some dashboard data could not be loaded: ${failures.join(", ")}.`);
-      });
+      }
+    );
   }, []);
 
   const nav = (next: Section) => setSection(next);
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <div className="sidebar-brand"><img className="brand-logo sidebar-logo" src="/as-logo.jpg" alt="Army Welfare Trust logo" /><span>OFAS</span></div>
-      <p className="eyebrow sidebar-label">ADMIN CONSOLE</p>
-      <nav>
-        {(["overview", "users", "visits", "surveyors", "fields", "assignments"] as Section[]).map((item) =>
-          <button key={item} className={section === item ? "nav-item active" : "nav-item"} onClick={() => nav(item)}>
-            <span>{item === "overview" ? "▦" : item === "users" ? "♙" : item === "visits" ? "◷" : item === "surveyors" ? "♟" : item === "fields" ? "⌖" : "⇄"}</span>
-            {item === "visits" ? "Visit Details" : item[0].toUpperCase() + item.slice(1)}
-          </button>
+  return (
+    <div className={sidebarOpen ? "app-shell sidebar-open" : "app-shell"}>
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <img className="brand-logo sidebar-logo" src="/as-logo.jpg" alt="Army Welfare Trust logo" />
+          <span>OFAS</span>
+        </div>
+        <p className="eyebrow sidebar-label">ADMIN CONSOLE</p>
+        <nav>
+          {(["overview", "users", "visits", "surveyors", "fields", "assignments"] as Section[]).map((item) => (
+            <button
+              key={item}
+              className={section === item ? "nav-item active" : "nav-item"}
+              onClick={() => nav(item)}
+            >
+              <span>
+                {item === "overview"
+                  ? "▦"
+                  : item === "users"
+                    ? "♙"
+                    : item === "visits"
+                      ? "◷"
+                      : item === "surveyors"
+                        ? "♟"
+                        : item === "fields"
+                          ? "⌖"
+                          : "⇄"}
+              </span>
+              {item === "visits" ? "Visit Details" : item[0].toUpperCase() + item.slice(1)}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <span className="status-dot" /> Backend connected
+        </div>
+      </aside>
+      <main className="content">
+        <header className="topbar">
+          <div className="topbar-title">
+            <button
+              type="button"
+              className="sidebar-toggle"
+              aria-label={sidebarOpen ? "Hide navigation" : "Show navigation"}
+              aria-expanded={sidebarOpen}
+              onClick={() => setSidebarOpen((open) => !open)}
+            >
+              ☰
+            </button>
+            <div>
+              <p className="eyebrow">CONTROL CENTER</p>
+              <h2>{section === "visits" ? "Visit Details" : section[0].toUpperCase() + section.slice(1)}</h2>
+            </div>
+          </div>
+          <div className="user-menu">
+            <span>{username}</span>
+            <small>{role.replace("_", " ")}</small>
+            <button onClick={onLogout}>Sign out</button>
+          </div>
+        </header>
+        {error && <div className="error banner">{error}</div>}
+        {section === "overview" && (
+          <Overview
+            metrics={metrics}
+            onNavigate={nav}
+            onOpenVisit={(visitId) => {
+              setPendingVisitId(visitId);
+              setSection("visits");
+            }}
+          />
         )}
-      </nav>
-      <div className="sidebar-footer"><span className="status-dot" /> Backend connected</div>
-    </aside>
-    <main className="content">
-      <header className="topbar"><div><p className="eyebrow">CONTROL CENTER</p><h2>{section === "visits" ? "Visit Details" : section[0].toUpperCase() + section.slice(1)}</h2></div><div className="user-menu"><span>{username}</span><small>{role.replace("_", " ")}</small><button onClick={onLogout}>Sign out</button></div></header>
-      {error && <div className="error banner">{error}</div>}
-      {section === "overview" && <Overview metrics={metrics} visits={visits} onNavigate={nav} />}
-      {section === "users" && <Users users={users} surveyors={surveyors} canCreateAdmin={role === "super_admin"} onSurveyorCreated={(surveyor) => setSurveyors((current) => [surveyor, ...current])} onAdminCreated={(user) => setUsers((current) => [user, ...current])} onUsersChanged={setUsers} onSurveyorsChanged={setSurveyors} />}
-      {section === "visits" && <VisitDetails visits={visits} surveyors={surveyors} />}
-      {section === "surveyors" && <Surveyors surveyors={surveyors} onChanged={(next) => setSurveyors(next)} />}
-      {section === "fields" && <Fields fields={fields} assignments={assignments} onFieldCreated={(field) => setFields((current) => [field, ...current])} onChanged={(next) => setFields(next)} />}
-      {section === "assignments" && <Assignments assignments={assignments} surveyors={surveyors} fields={fields} onAssignmentCreated={(assignment) => setAssignments((current) => [assignment, ...current])} onChanged={(next) => setAssignments(next)} />}
-    </main>
-  </div>;
+        {section === "users" && (
+          <Users
+            users={users}
+            surveyors={surveyors}
+            canCreateAdmin={role === "super_admin"}
+            onSurveyorCreated={(surveyor) => setSurveyors((current) => [surveyor, ...current])}
+            onAdminCreated={(user) => setUsers((current) => [user, ...current])}
+            onUsersChanged={setUsers}
+            onSurveyorsChanged={setSurveyors}
+          />
+        )}
+        {section === "visits" && (
+          <VisitDetails surveyors={surveyors} fields={fields} initialVisitId={pendingVisitId} />
+        )}
+        {section === "surveyors" && <Surveyors surveyors={surveyors} onChanged={(next) => setSurveyors(next)} />}
+        {section === "fields" && (
+          <Fields
+            fields={fields}
+            assignments={assignments}
+            onFieldCreated={(field) => setFields((current) => [field, ...current])}
+            onChanged={(next) => setFields(next)}
+          />
+        )}
+        {section === "assignments" && (
+          <Assignments
+            assignments={assignments}
+            surveyors={surveyors}
+            fields={fields}
+            onAssignmentCreated={(assignment) => setAssignments((current) => [assignment, ...current])}
+            onChanged={(next) => setAssignments(next)}
+          />
+        )}
+      </main>
+    </div>
+  );
 }
 
-function Assignments({ assignments, surveyors, fields, onAssignmentCreated, onChanged }: { assignments: Assignment[]; surveyors: Surveyor[]; fields: Field[]; onAssignmentCreated: (assignment: Assignment) => void; onChanged: (assignments: Assignment[]) => void }) {
+function Assignments({
+  assignments,
+  surveyors,
+  fields,
+  onAssignmentCreated,
+  onChanged
+}: {
+  assignments: Assignment[];
+  surveyors: Surveyor[];
+  fields: Field[];
+  onAssignmentCreated: (assignment: Assignment) => void;
+  onChanged: (assignments: Assignment[]) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -163,226 +282,153 @@ function Assignments({ assignments, surveyors, fields, onAssignmentCreated, onCh
     }
   }
 
-  return <div className="page">
-    <section className="panel">
-      <div className="panel-heading">
-        <div><p className="eyebrow">FIELD OPERATIONS</p><h3>Assignments</h3><p className="muted">Assign fields to surveyors and track assignment completion.</p></div>
-        <button className="primary" onClick={() => { setOpen(!open); setError(""); }}>{open ? "Cancel" : "Assign field"}</button>
-      </div>
-      {open && <form className="create-form" onSubmit={submit}>
-        <div className="form-grid">
-          <label>Surveyor<select required value={form.surveyor_id} onChange={(event) => setForm({ ...form, surveyor_id: event.target.value })}><option value="">Select surveyor</option>{surveyors.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.employee_id} — {item.full_name}</option>)}</select></label>
-          <label>Field<select required value={form.field_id} onChange={(event) => setForm({ ...form, field_id: event.target.value })}><option value="">Select field</option>{fields.filter((item) => item.is_active).map((item) => <option key={item.id} value={item.id}>{item.field_code} — {item.name}</option>)}</select></label>
-          <label>Start date<input required type="date" value={form.start_date} onChange={(event) => setForm({ ...form, start_date: event.target.value })} /></label>
-          <label>End date<input required type="date" min={form.start_date || undefined} value={form.end_date} onChange={(event) => setForm({ ...form, end_date: event.target.value })} /></label>
+  return (
+    <div className="page">
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">FIELD OPERATIONS</p>
+            <h3>Assignments</h3>
+            <p className="muted">Assign fields to surveyors and track assignment completion.</p>
+          </div>
+          <button
+            className="primary"
+            onClick={() => {
+              setOpen(!open);
+              setError("");
+            }}
+          >
+            {open ? "Cancel" : "Assign field"}
+          </button>
         </div>
-        {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? "Assigning..." : "Create assignment"}</button>
-      </form>}
-      <DataTable title="" headers={["Surveyor", "Field", "Start date", "End date", "Status", "Actions"]} rows={assignments.map((assignment) => [
-        assignment.surveyor_name ?? assignment.surveyor_id,
-        assignment.field_code ?? assignment.field_id,
-        assignment.start_date,
-        assignment.end_date,
-        assignment.is_completed ? "Completed" : "Pending",
-        <Actions key={assignment.id}
-          onEdit={async () => {
-            const start = window.prompt("Start date (YYYY-MM-DD)", assignment.start_date);
-            const end = window.prompt("End date (YYYY-MM-DD)", assignment.end_date);
-            if (!start || !end) return;
-            try { await api.updateAssignment(assignment.id, { start_date: start, end_date: end }); onChanged(assignments.map((item) => item.id === assignment.id ? { ...item, start_date: start, end_date: end } : item)); } catch (cause) { window.alert(cause instanceof Error ? cause.message : "Unable to update assignment."); }
-          }}
-          onDelete={async () => {
-            if (!window.confirm("Delete this assignment?")) return;
-            try { await api.deleteAssignment(assignment.id); onChanged(assignments.filter((item) => item.id !== assignment.id)); } catch (cause) { window.alert(cause instanceof Error ? cause.message : "Unable to delete assignment."); }
-          }} />
-      ])} />
-    </section>
-  </div>;
+        {open && (
+          <form className="create-form" onSubmit={submit}>
+            <div className="form-grid">
+              <label>
+                Surveyor
+                <select
+                  required
+                  value={form.surveyor_id}
+                  onChange={(event) => setForm({ ...form, surveyor_id: event.target.value })}
+                >
+                  <option value="">Select surveyor</option>
+                  {surveyors
+                    .filter((item) => item.is_active)
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.employee_id} — {item.full_name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Field
+                <select
+                  required
+                  value={form.field_id}
+                  onChange={(event) => setForm({ ...form, field_id: event.target.value })}
+                >
+                  <option value="">Select field</option>
+                  {fields
+                    .filter((item) => item.is_active)
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.field_code} — {item.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Start date
+                <input
+                  required
+                  type="date"
+                  value={form.start_date}
+                  onChange={(event) => setForm({ ...form, start_date: event.target.value })}
+                />
+              </label>
+              <label>
+                End date
+                <input
+                  required
+                  type="date"
+                  min={form.start_date || undefined}
+                  value={form.end_date}
+                  onChange={(event) => setForm({ ...form, end_date: event.target.value })}
+                />
+              </label>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <button className="primary" disabled={busy}>
+              {busy ? "Assigning..." : "Create assignment"}
+            </button>
+          </form>
+        )}
+        <DataTable
+          title=""
+          headers={["Surveyor", "Field", "Start date", "End date", "Status", "Actions"]}
+          rows={assignments.map((assignment) => [
+            assignment.surveyor_name ?? assignment.surveyor_id,
+            assignment.field_code ?? assignment.field_id,
+            assignment.start_date,
+            assignment.end_date,
+            assignment.is_completed ? "Completed" : "Pending",
+            <Actions
+              key={assignment.id}
+              onEdit={async () => {
+                const start = window.prompt("Start date (YYYY-MM-DD)", assignment.start_date);
+                const end = window.prompt("End date (YYYY-MM-DD)", assignment.end_date);
+                if (!start || !end) return;
+                try {
+                  await api.updateAssignment(assignment.id, { start_date: start, end_date: end });
+                  onChanged(
+                    assignments.map((item) =>
+                      item.id === assignment.id ? { ...item, start_date: start, end_date: end } : item
+                    )
+                  );
+                } catch (cause) {
+                  window.alert(cause instanceof Error ? cause.message : "Unable to update assignment.");
+                }
+              }}
+              onDelete={async () => {
+                if (!window.confirm("Delete this assignment?")) return;
+                try {
+                  await api.deleteAssignment(assignment.id);
+                  onChanged(assignments.filter((item) => item.id !== assignment.id));
+                } catch (cause) {
+                  window.alert(cause instanceof Error ? cause.message : "Unable to delete assignment.");
+                }
+              }}
+            />
+          ])}
+        />
+      </section>
+    </div>
+  );
 }
 
-function VisitDetails({ visits, surveyors }: { visits: Visit[]; surveyors: Surveyor[] }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState("");
-  const [surveyorId, setSurveyorId] = useState("");
-  const [filteredVisits, setFilteredVisits] = useState(visits);
-  const [detail, setDetail] = useState<VisitDetail | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
-  const [reviewBusy, setReviewBusy] = useState(false);
-  const [reviewMessage, setReviewMessage] = useState("");
-
-  useEffect(() => {
-    const next = visits.filter((visit) =>
-      (!statusFilter || visit.review_status === statusFilter || visit.status === statusFilter) &&
-      (!surveyorId || visit.surveyor_id === surveyorId)
-    );
-    setFilteredVisits(next);
-    if (selectedId && !next.some((visit) => visit.id === selectedId)) {
-      setSelectedId(null);
-      setDetail(null);
-    }
-  }, [visits, statusFilter, surveyorId, selectedId]);
-
-  useEffect(() => {
-    if (!detail) { setPhotoUrls({}); return; }
-    const created: string[] = [];
-    let active = true;
-    const keys: string[] = [];
-    if (detail.visit.selfie_photo_s3_key) keys.push(detail.visit.selfie_photo_s3_key);
-    (detail.visit.field_photos ?? []).forEach((photo) => { if (photo?.s3_key) keys.push(photo.s3_key); });
-    keys.forEach((key) => {
-      photoObjectUrl(key)
-        .then((url) => {
-          if (!active) { URL.revokeObjectURL(url); return; }
-          created.push(url);
-          setPhotoUrls((current) => ({ ...current, [key]: url }));
-        })
-        .catch(() => {});
-    });
-    return () => { active = false; created.forEach((url) => URL.revokeObjectURL(url)); };
-  }, [detail]);
-
-  async function selectVisit(id: string) {
-    setSelectedId(id);
-    setLoading(true);
-    setError("");
-    setReviewMessage("");
-    setPhotoUrls({});
-    try {
-      setDetail(await api.visitDetail(id));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load visit details.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function submitReview(decision: "VALID" | "INVALID" | "FLAGGED") {
-    if (!detail) return;
-    const notes = decision === "VALID"
-      ? ""
-      : (window.prompt(`Add notes for marking this visit ${decision.toLowerCase()} (optional)`) ?? "");
-    setReviewBusy(true);
-    setReviewMessage("");
-    try {
-      const response = await api.reviewVisit(detail.visit.id, decision, notes);
-      setDetail({
-        ...detail,
-        visit: {
-          ...detail.visit,
-          status: decision.toLowerCase(),
-          review_status: response.review_status,
-          review_notes: notes,
-          reviewed_at: response.reviewed_at
-        }
-      });
-      setReviewMessage(`Visit marked as ${response.review_status}.`);
-    } catch (cause) {
-      setReviewMessage(cause instanceof Error ? cause.message : "Unable to review visit.");
-    } finally {
-      setReviewBusy(false);
-    }
-  }
-
-  const fieldPhotos = detail?.visit.field_photos ?? [];
-
-  return <div className="page">
-    <section className="panel">
-      <div className="panel-heading">
-        <div><p className="eyebrow">AUDIT TRAIL</p><h3>Visit details</h3><p className="muted">Review field visits submitted by surveyors.</p></div>
-      </div>
-      <div className="filter-bar">
-        <label>Surveyor<select value={surveyorId} onChange={(event) => setSurveyorId(event.target.value)}><option value="">All surveyors</option>{surveyors.map((surveyor) => <option key={surveyor.id} value={surveyor.id}>{surveyor.employee_id} — {surveyor.full_name}</option>)}</select></label>
-        <label>Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="">All statuses</option><option value="pending">Pending</option><option value="valid">Valid</option><option value="flagged">Flagged</option><option value="invalid">Invalid</option></select></label>
-      </div>
-      {error && <div className="error">{error}</div>}
-      <DataTable title="" headers={["Visit", "Surveyor", "Field", "Captured", "GPS", "Status", "Reviewed"]} rows={filteredVisits.map((visit) => [
-        <button type="button" className="link-button" title={visit.visit_id} onClick={() => void selectVisit(visit.id)}>{shortId(visit.visit_id)}</button>,
-        visit.surveyor_name ?? "—",
-        visit.field_code ?? "—",
-        new Date(visit.satellite_timestamp).toLocaleString(),
-        `${visit.latitude.toFixed(5)}, ${visit.longitude.toFixed(5)}`,
-        <StatusBadge key={`${visit.id}-status`} visit={visit} />,
-        visit.reviewed_at ? new Date(visit.reviewed_at).toLocaleString() : "Unreviewed"
-      ])} />
-    </section>
-    {selectedId && <section className="panel detail-panel">
-      <div className="panel-heading"><div><p className="eyebrow">SELECTED VISIT</p><h3 title={detail?.visit.visit_id ?? selectedId}>{shortId(detail?.visit.visit_id ?? selectedId)}</h3></div>{loading && <span className="muted">Loading...</span>}</div>
-      {detail && <div className="detail-grid">
-        <div className="detail-item"><span>Status</span><strong><StatusBadge visit={detail.visit} /></strong></div>
-        <DetailItem label="Visit ID" value={detail.visit.visit_id} />
-        <DetailItem label="Surveyor" value={detail.visit.surveyor ? `${detail.visit.surveyor.employee_id} — ${detail.visit.surveyor.full_name}` : "—"} />
-        <DetailItem label="Field" value={detail.visit.field ? `${detail.visit.field.field_code} — ${detail.visit.field.name}` : "—"} />
-        <DetailItem label="Captured" value={new Date(detail.visit.satellite_timestamp).toLocaleString()} />
-        <DetailItem label="Coordinates" value={`${detail.visit.latitude}, ${detail.visit.longitude}`} />
-        <DetailItem label="GPS accuracy" value={`${detail.visit.accuracy_meters} m`} />
-        <DetailItem label="Selfie coords" value={detail.visit.selfie_latitude != null && detail.visit.selfie_longitude != null ? `${detail.visit.selfie_latitude.toFixed(5)}, ${detail.visit.selfie_longitude.toFixed(5)}` : "—"} />
-        <DetailItem label="Selfie accuracy" value={detail.visit.selfie_accuracy_meters != null ? `${detail.visit.selfie_accuracy_meters} m` : "—"} />
-        <DetailItem label="Face match" value={detail.visit.face_match_score == null ? "—" : `${(detail.visit.face_match_score * 100).toFixed(1)}%`} />
-        <DetailItem label="Liveness" value={detail.visit.liveness_verified ? "Verified" : "Not verified"} />
-        <DetailItem label="Trail points" value={String(detail.trail_entries.length)} />
-        <DetailItem label="Reviewed at" value={detail.visit.reviewed_at ? new Date(detail.visit.reviewed_at).toLocaleString() : "Unreviewed"} />
-        <DetailItem label="Review notes" value={detail.visit.review_notes ?? "—"} />
-      </div>}
-      {detail && <div className="photo-section">
-        <div className="subtable-heading"><h3>Photos</h3><span className="muted">{fieldPhotos.length} field photo(s) · selfie {detail.visit.selfie_photo_s3_key ? "attached" : "missing"}</span></div>
-        <div className="photo-gallery">
-          <figure className="photo-card">
-            {detail.visit.selfie_photo_s3_key && photoUrls[detail.visit.selfie_photo_s3_key]
-              ? <img src={photoUrls[detail.visit.selfie_photo_s3_key]} alt="Selfie" />
-              : <div className="photo-placeholder">{detail.visit.selfie_photo_s3_key ? "Loading..." : "No selfie"}</div>}
-            <figcaption>
-              <strong>Selfie</strong>
-              <span className="muted">{detail.visit.selfie_photo_hash ? `${detail.visit.selfie_photo_hash.slice(0, 16)}…` : "—"}</span>
-              {detail.visit.selfie_latitude != null && detail.visit.selfie_longitude != null && (
-                <span className="muted">@ {detail.visit.selfie_latitude.toFixed(5)}, {detail.visit.selfie_longitude.toFixed(5)}</span>
-              )}
-              {detail.visit.selfie_accuracy_meters != null && (
-                <span className="muted">±{detail.visit.selfie_accuracy_meters} m</span>
-              )}
-            </figcaption>
-          </figure>
-          {fieldPhotos.map((photo, index) => (
-            <figure className="photo-card" key={`${photo.hash}-${index}`}>
-              {photo.s3_key && photoUrls[photo.s3_key]
-                ? <img src={photoUrls[photo.s3_key]} alt={`Field photo ${index + 1}`} />
-                : <div className="photo-placeholder">{photo.s3_key ? "Loading..." : "Not uploaded"}</div>}
-              <figcaption>
-                <strong>Field photo {index + 1}</strong>
-                <span className="muted">{photo.hash.slice(0, 16)}…</span>
-                <span className="muted">{new Date(photo.timestamp).toLocaleString()}</span>
-                {photo.latitude != null && photo.longitude != null && (
-                  <span className="muted">@ {photo.latitude.toFixed(5)}, {photo.longitude.toFixed(5)}</span>
-                )}
-              </figcaption>
-            </figure>
-          ))}
-        </div>
-      </div>}
-      {detail && <div className="review-actions">
-        <div><p className="eyebrow">DECISION</p><h4>Mark this visit</h4><p className="muted">{detail.visit.review_status ? `Already marked ${detail.visit.review_status}.` : "Choose an outcome for this visit."}</p></div>
-        <div className="review-buttons">
-          <button className="primary" disabled={reviewBusy || !!detail.visit.review_status} onClick={() => void submitReview("VALID")}>Valid</button>
-          <button className="secondary flag" disabled={reviewBusy || !!detail.visit.review_status} onClick={() => void submitReview("FLAGGED")}>Flagged</button>
-          <button className="secondary danger" disabled={reviewBusy || !!detail.visit.review_status} onClick={() => void submitReview("INVALID")}>Invalid</button>
-        </div>
-        {reviewMessage && <div className="notice">{reviewMessage}</div>}
-      </div>}
-    </section>}
-  </div>;
-}
-
-function DetailItem({ label, value }: { label: string; value: string }) {
-  return <div className="detail-item"><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function Fields({ fields, assignments, onFieldCreated, onChanged }: { fields: Field[]; assignments: Assignment[]; onFieldCreated: (field: Field) => void; onChanged: (fields: Field[]) => void }) {
+function Fields({
+  fields,
+  assignments,
+  onFieldCreated,
+  onChanged
+}: {
+  fields: Field[];
+  assignments: Assignment[];
+  onFieldCreated: (field: Field) => void;
+  onChanged: (fields: Field[]) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ field_code: "", name: "", crop_type: "", center_lat: "", center_lon: "", radius_meters: "100" });
+  const [form, setForm] = useState({
+    field_code: "",
+    name: "",
+    crop_type: "",
+    center_lat: "",
+    center_lon: "",
+    radius_meters: "100"
+  });
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -397,8 +443,14 @@ function Fields({ fields, assignments, onFieldCreated, onChanged }: { fields: Fi
       const centerLat = Number(form.center_lat);
       const centerLon = Number(form.center_lon);
       const radiusMeters = Number(form.radius_meters);
-      if (!Number.isFinite(centerLat) || centerLat < -90 || centerLat > 90 ||
-          !Number.isFinite(centerLon) || centerLon < -180 || centerLon > 180) {
+      if (
+        !Number.isFinite(centerLat) ||
+        centerLat < -90 ||
+        centerLat > 90 ||
+        !Number.isFinite(centerLon) ||
+        centerLon < -180 ||
+        centerLon > 180
+      ) {
         setError("Latitude must be between -90 and 90 and longitude between -180 and 180.");
         return;
       }
@@ -415,9 +467,15 @@ function Fields({ fields, assignments, onFieldCreated, onChanged }: { fields: Fi
         radius_meters: radiusMeters
       });
       onFieldCreated({
-        id: response.id, field_code: fieldCode, name: form.name, crop_type: form.crop_type || null,
-        center_lat: centerLat, center_lon: centerLon, radius_meters: radiusMeters,
-        is_active: true, created_at: new Date().toISOString()
+        id: response.id,
+        field_code: fieldCode,
+        name: form.name,
+        crop_type: form.crop_type || null,
+        center_lat: centerLat,
+        center_lon: centerLon,
+        radius_meters: radiusMeters,
+        is_active: true,
+        created_at: new Date().toISOString()
       });
       setForm({ field_code: "", name: "", crop_type: "", center_lat: "", center_lon: "", radius_meters: "100" });
       setOpen(false);
@@ -428,47 +486,160 @@ function Fields({ fields, assignments, onFieldCreated, onChanged }: { fields: Fi
     }
   }
 
-  return <div className="page">
-    <section className="panel">
-      <div className="panel-heading">
-        <div><p className="eyebrow">FIELD MANAGEMENT</p><h3>Fields</h3><p className="muted">Manage field locations used for surveyor assignments.</p></div>
-        <button className="primary" onClick={() => { setOpen(!open); setError(""); }}>{open ? "Cancel" : "Add field"}</button>
-      </div>
-      {open && <form className="create-form" onSubmit={submit}>
-        <div className="form-grid">
-          <label>Field code<input required minLength={3} maxLength={50} placeholder="FIELD-001" value={form.field_code} onChange={(event) => setForm({ ...form, field_code: event.target.value.toUpperCase() })} /></label>
-          <label>Name<input required maxLength={200} placeholder="North farm" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label>
-          <label>Crop type<input maxLength={100} placeholder="Wheat" value={form.crop_type} onChange={(event) => setForm({ ...form, crop_type: event.target.value })} /></label>
-          <label>Latitude<input required type="number" min="-90" max="90" step="any" placeholder="28.6139" value={form.center_lat} onChange={(event) => setForm({ ...form, center_lat: event.target.value })} /></label>
-          <label>Longitude<input required type="number" min="-180" max="180" step="any" placeholder="77.2090" value={form.center_lon} onChange={(event) => setForm({ ...form, center_lon: event.target.value })} /></label>
-          <label>Radius (meters)<input required type="number" min="1" step="any" value={form.radius_meters} onChange={(event) => setForm({ ...form, radius_meters: event.target.value })} /></label>
+  return (
+    <div className="page">
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">FIELD MANAGEMENT</p>
+            <h3>Fields</h3>
+            <p className="muted">Manage field locations used for surveyor assignments.</p>
+          </div>
+          <button
+            className="primary"
+            onClick={() => {
+              setOpen(!open);
+              setError("");
+            }}
+          >
+            {open ? "Cancel" : "Add field"}
+          </button>
         </div>
-        {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? "Creating..." : "Create field"}</button>
-      </form>}
-      <DataTable title="" headers={["Code", "Name", "Crop", "Latitude", "Longitude", "Radius", "Status", "Actions"]} rows={fields.map((field) => [
-        field.field_code, field.name, field.crop_type ?? "—", field.center_lat.toFixed(6), field.center_lon.toFixed(6),
-        `${field.radius_meters} m`, assignments.some((assignment) => assignment.field_id === field.id) ? "Assigned" : "Unassigned",
-        <Actions key={field.id}
-          onEdit={async () => {
-            const name = window.prompt("Field name", field.name);
-            if (!name) return;
-            try { await api.updateField(field.id, { name, crop_type: field.crop_type ?? "", center_lat: field.center_lat, center_lon: field.center_lon, radius_meters: field.radius_meters }); onChanged(fields.map((item) => item.id === field.id ? { ...item, name } : item)); } catch (cause) { window.alert(cause instanceof Error ? cause.message : "Unable to update field."); }
-          }}
-          onDelete={async () => {
-            if (!window.confirm("Deactivate this field? Historical visits will remain available.")) return;
-            try { await api.deleteField(field.id); onChanged(fields.map((item) => item.id === field.id ? { ...item, is_active: false } : item)); } catch (cause) { window.alert(cause instanceof Error ? cause.message : "Unable to deactivate field."); }
-          }} />
-      ])} />
-    </section>
-  </div>;
+        {open && (
+          <form className="create-form" onSubmit={submit}>
+            <div className="form-grid">
+              <label>
+                Field code
+                <input
+                  required
+                  minLength={3}
+                  maxLength={50}
+                  placeholder="FIELD-001"
+                  value={form.field_code}
+                  onChange={(event) => setForm({ ...form, field_code: event.target.value.toUpperCase() })}
+                />
+              </label>
+              <label>
+                Name
+                <input
+                  required
+                  maxLength={200}
+                  placeholder="North farm"
+                  value={form.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                />
+              </label>
+              <label>
+                Crop type
+                <input
+                  maxLength={100}
+                  placeholder="Wheat"
+                  value={form.crop_type}
+                  onChange={(event) => setForm({ ...form, crop_type: event.target.value })}
+                />
+              </label>
+              <label>
+                Latitude
+                <input
+                  required
+                  type="number"
+                  min="-90"
+                  max="90"
+                  step="any"
+                  placeholder="28.6139"
+                  value={form.center_lat}
+                  onChange={(event) => setForm({ ...form, center_lat: event.target.value })}
+                />
+              </label>
+              <label>
+                Longitude
+                <input
+                  required
+                  type="number"
+                  min="-180"
+                  max="180"
+                  step="any"
+                  placeholder="77.2090"
+                  value={form.center_lon}
+                  onChange={(event) => setForm({ ...form, center_lon: event.target.value })}
+                />
+              </label>
+              <label>
+                Radius (meters)
+                <input
+                  required
+                  type="number"
+                  min="1"
+                  step="any"
+                  value={form.radius_meters}
+                  onChange={(event) => setForm({ ...form, radius_meters: event.target.value })}
+                />
+              </label>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <button className="primary" disabled={busy}>
+              {busy ? "Creating..." : "Create field"}
+            </button>
+          </form>
+        )}
+        <DataTable
+          title=""
+          headers={["Code", "Name", "Crop", "Latitude", "Longitude", "Radius", "Status", "Actions"]}
+          rows={fields.map((field) => [
+            field.field_code,
+            field.name,
+            field.crop_type ?? "—",
+            field.center_lat.toFixed(6),
+            field.center_lon.toFixed(6),
+            `${field.radius_meters} m`,
+            assignments.some((assignment) => assignment.field_id === field.id) ? "Assigned" : "Unassigned",
+            <Actions
+              key={field.id}
+              onEdit={async () => {
+                const name = window.prompt("Field name", field.name);
+                if (!name) return;
+                try {
+                  await api.updateField(field.id, {
+                    name,
+                    crop_type: field.crop_type ?? "",
+                    center_lat: field.center_lat,
+                    center_lon: field.center_lon,
+                    radius_meters: field.radius_meters
+                  });
+                  onChanged(fields.map((item) => (item.id === field.id ? { ...item, name } : item)));
+                } catch (cause) {
+                  window.alert(cause instanceof Error ? cause.message : "Unable to update field.");
+                }
+              }}
+              onDelete={async () => {
+                if (!window.confirm("Deactivate this field? Historical visits will remain available.")) return;
+                try {
+                  await api.deleteField(field.id);
+                  onChanged(fields.map((item) => (item.id === field.id ? { ...item, is_active: false } : item)));
+                } catch (cause) {
+                  window.alert(cause instanceof Error ? cause.message : "Unable to deactivate field.");
+                }
+              }}
+            />
+          ])}
+        />
+      </section>
+    </div>
+  );
 }
 
-function Surveyors({ surveyors, onChanged }: { surveyors: Surveyor[]; onChanged: (surveyors: Surveyor[]) => void }) {
+function Surveyors({
+  surveyors,
+  onChanged
+}: {
+  surveyors: Surveyor[];
+  onChanged: (surveyors: Surveyor[]) => void;
+}) {
   const [editing, setEditing] = useState<Surveyor | null>(null);
   const [form, setForm] = useState({ full_name: "", phone_number: "", password: "" });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [tracking, setTracking] = useState<Surveyor | null>(null);
 
   function beginEdit(surveyor: Surveyor) {
     setEditing(surveyor);
@@ -491,9 +662,13 @@ function Surveyors({ surveyors, onChanged }: { surveyors: Surveyor[]; onChanged:
         phone_number: form.phone_number,
         ...(form.password ? { password: form.password } : {})
       });
-      onChanged(surveyors.map((item) => item.id === editing.id
-        ? { ...item, full_name: form.full_name.trim(), phone_number: form.phone_number }
-        : item));
+      onChanged(
+        surveyors.map((item) =>
+          item.id === editing.id
+            ? { ...item, full_name: form.full_name.trim(), phone_number: form.phone_number }
+            : item
+        )
+      );
       setEditing(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to update surveyor.");
@@ -507,55 +682,118 @@ function Surveyors({ surveyors, onChanged }: { surveyors: Surveyor[]; onChanged:
     if (!window.confirm(`Are you sure you want to ${action} ${surveyor.full_name}?`)) return;
     try {
       await api.updateSurveyor(surveyor.id, { is_active: !surveyor.is_active });
-      onChanged(surveyors.map((item) => item.id === surveyor.id ? { ...item, is_active: !surveyor.is_active } : item));
+      onChanged(surveyors.map((item) => (item.id === surveyor.id ? { ...item, is_active: !surveyor.is_active } : item)));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : `Unable to ${action} surveyor.`);
     }
   }
 
-  interface FaceStatusBadgeProps {
-  status: "registered" | "not_registered" | undefined;
+  return (
+    <div className="page">
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">FIELD OPERATIONS</p>
+            <h3>Surveyors</h3>
+            <p className="muted">Edit or activate/deactivate surveyor accounts.</p>
+          </div>
+        </div>
+        {editing && (
+          <form className="create-form edit-form" onSubmit={save}>
+            <div className="form-heading">
+              <div>
+                <h3>Edit surveyor</h3>
+                <p className="muted">Update profile details or set a new password.</p>
+              </div>
+              <button type="button" className="link-button" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Full name
+                <input
+                  required
+                  maxLength={200}
+                  value={form.full_name}
+                  onChange={(event) => setForm({ ...form, full_name: event.target.value })}
+                />
+              </label>
+              <label>
+                Phone number
+                <input
+                  required
+                  type="tel"
+                  value={form.phone_number}
+                  onChange={(event) => setForm({ ...form, phone_number: event.target.value })}
+                />
+              </label>
+              <label>
+                New password
+                <input
+                  minLength={12}
+                  type="password"
+                  placeholder="Leave blank to keep current password"
+                  value={form.password}
+                  onChange={(event) => setForm({ ...form, password: event.target.value })}
+                />
+              </label>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <button className="primary" disabled={busy}>
+              {busy ? "Saving..." : "Save surveyor"}
+            </button>
+          </form>
+        )}
+        <DataTable
+          title=""
+          headers={["Employee ID", "Name", "Phone", "Email", "Face Registration", "Last sync", "Status", "Actions"]}
+          rows={surveyors.map((surveyor) => [
+            surveyor.employee_id,
+            surveyor.full_name,
+            surveyor.phone_number ?? "—",
+            surveyor.email ?? "—",
+            <FaceStatusBadge key={`${surveyor.id}-face`} status={surveyor.face_registration_status} />,
+            surveyor.last_location_sync_at ? new Date(surveyor.last_location_sync_at).toLocaleString() : "Never",
+            surveyor.is_active ? "Active" : "Inactive",
+            <Actions
+              key={surveyor.id}
+              onEdit={() => beginEdit(surveyor)}
+              onToggle={() => toggle(surveyor)}
+              onTrack={() => setTracking(surveyor)}
+              active={surveyor.is_active}
+            />
+          ])}
+        />
+      </section>
+      {tracking && (
+        <SurveyorActivityPanel
+          surveyorId={tracking.id}
+          surveyorName={tracking.full_name}
+          onClose={() => setTracking(null)}
+        />
+      )}
+    </div>
+  );
 }
 
-function FaceStatusBadge({ status }: FaceStatusBadgeProps) {
-  if (status === "registered") {
-    return <span className="status-badge registered">✓ Registered</span>;
-  }
-  return <span className="status-badge not-registered">✗ Not Registered</span>;
-}
-
-  return <div className="page"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">FIELD OPERATIONS</p><h3>Surveyors</h3><p className="muted">Edit or activate/deactivate surveyor accounts.</p></div></div>
-    {editing && <form className="create-form edit-form" onSubmit={save}>
-      <div className="form-heading"><div><h3>Edit surveyor</h3><p className="muted">Update profile details or set a new password.</p></div><button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button></div>
-      <div className="form-grid">
-        <label>Full name<input required maxLength={200} value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
-        <label>Phone number<input required type="tel" value={form.phone_number} onChange={(event) => setForm({ ...form, phone_number: event.target.value })} /></label>
-        <label>New password<input minLength={12} type="password" placeholder="Leave blank to keep current password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>
-      </div>
-      {error && <div className="error">{error}</div>}
-      <button className="primary" disabled={busy}>{busy ? "Saving..." : "Save surveyor"}</button>
-    </form>}
-    <DataTable title="" headers={["Employee ID", "Name", "Phone", "Email", "Face Registration", "Status", "Actions"]} rows={surveyors.map((surveyor) => [
-      surveyor.employee_id,
-      surveyor.full_name,
-      surveyor.phone_number ?? "—",
-      surveyor.email ?? "—",
-      <FaceStatusBadge status={surveyor.face_registration_status} />,
-      surveyor.is_active ? "Active" : "Inactive",
-      <Actions key={surveyor.id} onEdit={() => beginEdit(surveyor)} onToggle={() => toggle(surveyor)} active={surveyor.is_active} />
-    ])} />
-  </section></div>;
-}
-
-function Actions({ onEdit, onDelete, onToggle, active = true }: { onEdit: () => void; onDelete?: () => void; onToggle?: () => void; active?: boolean }) {
-  return <div className="row-actions">
-    <button type="button" className="link-button" onClick={onEdit}>Edit</button>
-    {onToggle && <button type="button" className="link-button danger" onClick={onToggle}>{active ? "Deactivate" : "Activate"}</button>}
-    {onDelete && <button type="button" className="link-button danger" onClick={onDelete}>Delete</button>}
-  </div>;
-}
-
-function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCreated, onUsersChanged, onSurveyorsChanged }: { users: ManagedUser[]; surveyors: Surveyor[]; canCreateAdmin: boolean; onSurveyorCreated: (surveyor: Surveyor) => void; onAdminCreated: (user: ManagedUser) => void; onUsersChanged: (users: ManagedUser[]) => void; onSurveyorsChanged: (surveyors: Surveyor[]) => void }) {
+function Users({
+  users,
+  surveyors,
+  canCreateAdmin,
+  onSurveyorCreated,
+  onAdminCreated,
+  onUsersChanged,
+  onSurveyorsChanged
+}: {
+  users: ManagedUser[];
+  surveyors: Surveyor[];
+  canCreateAdmin: boolean;
+  onSurveyorCreated: (surveyor: Surveyor) => void;
+  onAdminCreated: (user: ManagedUser) => void;
+  onUsersChanged: (users: ManagedUser[]) => void;
+  onSurveyorsChanged: (surveyors: Surveyor[]) => void;
+}) {
   const [formType, setFormType] = useState<"admin" | "surveyor" | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -566,6 +804,7 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
   const [editBusy, setEditBusy] = useState(false);
   const [adminEdit, setAdminEdit] = useState({ email: "", password: "" });
   const [surveyorEdit, setSurveyorEdit] = useState({ full_name: "", phone_number: "", password: "" });
+  const [tracking, setTracking] = useState<Surveyor | null>(null);
 
   async function submitForm(event: FormEvent) {
     event.preventDefault();
@@ -580,8 +819,14 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
 
         const response = await api.createAdmin(adminForm);
         onAdminCreated({
-          id: response.id, username: adminForm.username, email: adminForm.email, role: "admin",
-          totp_enabled: false, is_active: true, created_at: new Date().toISOString(), last_login: null
+          id: response.id,
+          username: adminForm.username,
+          email: adminForm.email,
+          role: "admin",
+          totp_enabled: false,
+          is_active: true,
+          created_at: new Date().toISOString(),
+          last_login: null
         });
         setAdminForm({ username: "", email: "", password: "" });
       } else {
@@ -592,9 +837,13 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
         }
         const response = await api.createSurveyor({ ...surveyorForm, employee_id: employeeId });
         onSurveyorCreated({
-          id: response.id, employee_id: employeeId, full_name: surveyorForm.full_name,
-          phone_number: surveyorForm.phone_number, email: null,
-          is_active: true, created_at: new Date().toISOString()
+          id: response.id,
+          employee_id: employeeId,
+          full_name: surveyorForm.full_name,
+          phone_number: surveyorForm.phone_number,
+          email: null,
+          is_active: true,
+          created_at: new Date().toISOString()
         });
         setSurveyorForm({ employee_id: "", full_name: "", phone_number: "", password: "" });
       }
@@ -631,7 +880,7 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
         }
         const payload = { email: adminEdit.email, ...(adminEdit.password ? { password: adminEdit.password } : {}) };
         await api.updateUser(editing.id, payload);
-        onUsersChanged(users.map((user) => user.id === editing.id ? { ...user, email: adminEdit.email } : user));
+        onUsersChanged(users.map((user) => (user.id === editing.id ? { ...user, email: adminEdit.email } : user)));
       } else {
         if (!surveyorEdit.full_name.trim() || !/^\+?[1-9]\d{1,14}$/.test(surveyorEdit.phone_number)) {
           setEditError("Enter a name and a valid phone number.");
@@ -643,9 +892,13 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
           ...(surveyorEdit.password ? { password: surveyorEdit.password } : {})
         };
         await api.updateSurveyor(editing.id, payload);
-        onSurveyorsChanged(surveyors.map((surveyor) => surveyor.id === editing.id
-          ? { ...surveyor, full_name: payload.full_name, phone_number: payload.phone_number }
-          : surveyor));
+        onSurveyorsChanged(
+          surveyors.map((surveyor) =>
+            surveyor.id === editing.id
+              ? { ...surveyor, full_name: payload.full_name, phone_number: payload.phone_number }
+              : surveyor
+          )
+        );
       }
       setEditing(null);
     } catch (cause) {
@@ -660,7 +913,7 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
     if (!window.confirm(`Are you sure you want to ${action} ${user.username}?`)) return;
     try {
       await api.updateUser(user.id, { is_active: !user.is_active });
-      onUsersChanged(users.map((item) => item.id === user.id ? { ...item, is_active: !user.is_active } : item));
+      onUsersChanged(users.map((item) => (item.id === user.id ? { ...item, is_active: !user.is_active } : item)));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : `Unable to ${action} administrator.`);
     }
@@ -671,116 +924,282 @@ function Users({ users, surveyors, canCreateAdmin, onSurveyorCreated, onAdminCre
     if (!window.confirm(`Are you sure you want to ${action} ${surveyor.full_name}?`)) return;
     try {
       await api.updateSurveyor(surveyor.id, { is_active: !surveyor.is_active });
-      onSurveyorsChanged(surveyors.map((item) => item.id === surveyor.id ? { ...item, is_active: !surveyor.is_active } : item));
+      onSurveyorsChanged(
+        surveyors.map((item) => (item.id === surveyor.id ? { ...item, is_active: !surveyor.is_active } : item))
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : `Unable to ${action} surveyor.`);
     }
   }
 
-  return <div className="page">
-    <section className="panel">
-      <div className="panel-heading">
-        <div><p className="eyebrow">ACCESS CONTROL</p><h3>System users</h3><p className="muted">All administrators, super administrators, and surveyor accounts.</p></div>
-        <div className="action-group">
-          <button className="primary" onClick={() => setFormType(formType === "surveyor" ? null : "surveyor")}>{formType === "surveyor" ? "Cancel" : "Create surveyor"}</button>
-          {canCreateAdmin && <button className="secondary" onClick={() => setFormType(formType === "admin" ? null : "admin")}>{formType === "admin" ? "Cancel" : "Create admin"}</button>}
+  return (
+    <div className="page">
+      <section className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">ACCESS CONTROL</p>
+            <h3>System users</h3>
+            <p className="muted">All administrators, super administrators, and surveyor accounts.</p>
+          </div>
+          <div className="action-group">
+            <button className="primary" onClick={() => setFormType(formType === "surveyor" ? null : "surveyor")}>
+              {formType === "surveyor" ? "Cancel" : "Create surveyor"}
+            </button>
+            {canCreateAdmin && (
+              <button className="secondary" onClick={() => setFormType(formType === "admin" ? null : "admin")}>
+                {formType === "admin" ? "Cancel" : "Create admin"}
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      {!canCreateAdmin && <div className="notice">Regular admins can create and manage surveyor accounts. Only a super admin can create administrator accounts.</div>}
-      {formType === "admin" && <form className="create-form" onSubmit={submitForm}>
-        <div className="form-heading"><div><h3>Create administrator</h3><p className="muted">The new account will be created with the <strong>admin</strong> role.</p></div></div>
-        <div className="form-grid">
-          <label>Username<input required minLength={3} maxLength={50} value={adminForm.username} onChange={(event) => setAdminForm({ ...adminForm, username: event.target.value })} /></label>
-          <label>Email<input required type="email" value={adminForm.email} onChange={(event) => setAdminForm({ ...adminForm, email: event.target.value })} /></label>
-          <label>Password<input required minLength={12} type="password" placeholder="12+ characters" value={adminForm.password} onChange={(event) => setAdminForm({ ...adminForm, password: event.target.value })} /></label>
+        {!canCreateAdmin && (
+          <div className="notice">
+            Regular admins can create and manage surveyor accounts. Only a super admin can create administrator
+            accounts.
+          </div>
+        )}
+        {formType === "admin" && (
+          <form className="create-form" onSubmit={submitForm}>
+            <div className="form-heading">
+              <div>
+                <h3>Create administrator</h3>
+                <p className="muted">
+                  The new account will be created with the <strong>admin</strong> role.
+                </p>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Username
+                <input
+                  required
+                  minLength={3}
+                  maxLength={50}
+                  value={adminForm.username}
+                  onChange={(event) => setAdminForm({ ...adminForm, username: event.target.value })}
+                />
+              </label>
+              <label>
+                Email
+                <input
+                  required
+                  type="email"
+                  value={adminForm.email}
+                  onChange={(event) => setAdminForm({ ...adminForm, email: event.target.value })}
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  required
+                  minLength={12}
+                  type="password"
+                  placeholder="12+ characters"
+                  value={adminForm.password}
+                  onChange={(event) => setAdminForm({ ...adminForm, password: event.target.value })}
+                />
+              </label>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <button className="primary" disabled={busy}>
+              {busy ? "Creating..." : "Create administrator"}
+            </button>
+          </form>
+        )}
+        {formType === "surveyor" && (
+          <form className="create-form" onSubmit={submitForm}>
+            <div className="form-heading">
+              <div>
+                <h3>Create surveyor</h3>
+                <p className="muted">Create the surveyor profile used for assignments and field visits.</p>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label>
+                Employee ID
+                <input
+                  required
+                  minLength={3}
+                  maxLength={50}
+                  placeholder="SURV-001"
+                  value={surveyorForm.employee_id}
+                  onChange={(event) =>
+                    setSurveyorForm({ ...surveyorForm, employee_id: event.target.value.toUpperCase() })
+                  }
+                />
+              </label>
+              <label>
+                Full name
+                <input
+                  required
+                  maxLength={200}
+                  value={surveyorForm.full_name}
+                  onChange={(event) => setSurveyorForm({ ...surveyorForm, full_name: event.target.value })}
+                />
+              </label>
+              <label>
+                Phone number
+                <input
+                  required
+                  type="tel"
+                  placeholder="+1234567890"
+                  value={surveyorForm.phone_number}
+                  onChange={(event) => setSurveyorForm({ ...surveyorForm, phone_number: event.target.value })}
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  required
+                  minLength={12}
+                  type="password"
+                  placeholder="12+ characters"
+                  value={surveyorForm.password}
+                  onChange={(event) => setSurveyorForm({ ...surveyorForm, password: event.target.value })}
+                />
+              </label>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <button className="primary" disabled={busy}>
+              {busy ? "Creating..." : "Create surveyor"}
+            </button>
+          </form>
+        )}
+        {editing?.type === "admin" && (
+          <form className="create-form edit-form" onSubmit={saveEdit}>
+            <div className="form-heading">
+              <div>
+                <h3>Edit administrator</h3>
+                <p className="muted">Update the email or leave the password blank to keep it unchanged.</p>
+              </div>
+              <button type="button" className="link-button" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Email
+                <input
+                  required
+                  type="email"
+                  value={adminEdit.email}
+                  onChange={(event) => setAdminEdit({ ...adminEdit, email: event.target.value })}
+                />
+              </label>
+              <label>
+                New password
+                <input
+                  minLength={12}
+                  type="password"
+                  placeholder="Leave blank to keep current password"
+                  value={adminEdit.password}
+                  onChange={(event) => setAdminEdit({ ...adminEdit, password: event.target.value })}
+                />
+              </label>
+            </div>
+            {editError && <div className="error">{editError}</div>}
+            <button className="primary" disabled={editBusy}>
+              {editBusy ? "Saving..." : "Save administrator"}
+            </button>
+          </form>
+        )}
+        {editing?.type === "surveyor" && (
+          <form className="create-form edit-form" onSubmit={saveEdit}>
+            <div className="form-heading">
+              <div>
+                <h3>Edit surveyor</h3>
+                <p className="muted">Update profile details or set a new password.</p>
+              </div>
+              <button type="button" className="link-button" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+            </div>
+            <div className="form-grid">
+              <label>
+                Full name
+                <input
+                  required
+                  maxLength={200}
+                  value={surveyorEdit.full_name}
+                  onChange={(event) => setSurveyorEdit({ ...surveyorEdit, full_name: event.target.value })}
+                />
+              </label>
+              <label>
+                Phone number
+                <input
+                  required
+                  type="tel"
+                  value={surveyorEdit.phone_number}
+                  onChange={(event) => setSurveyorEdit({ ...surveyorEdit, phone_number: event.target.value })}
+                />
+              </label>
+              <label>
+                New password
+                <input
+                  minLength={12}
+                  type="password"
+                  placeholder="Leave blank to keep current password"
+                  value={surveyorEdit.password}
+                  onChange={(event) => setSurveyorEdit({ ...surveyorEdit, password: event.target.value })}
+                />
+              </label>
+            </div>
+            {editError && <div className="error">{editError}</div>}
+            <button className="primary" disabled={editBusy}>
+              {editBusy ? "Saving..." : "Save surveyor"}
+            </button>
+          </form>
+        )}
+        <DataTable
+          title=""
+          headers={["Username", "Email", "Role", "MFA", "Created", "Last login", "Status", "Actions"]}
+          rows={users.map((user) => [
+            user.username,
+            user.email,
+            user.role.replace("_", " "),
+            user.totp_enabled ? "Enabled" : "Not enabled",
+            new Date(user.created_at).toLocaleDateString(),
+            user.last_login ? new Date(user.last_login).toLocaleString() : "Never",
+            user.is_active ? "Active" : "Inactive",
+            canCreateAdmin ? (
+              <Actions key={user.id} onEdit={() => beginAdminEdit(user)} onToggle={() => toggleAdmin(user)} active={user.is_active} />
+            ) : (
+              "—"
+            )
+          ])}
+        />
+        <div className="subtable-heading">
+          <h3>Surveyor accounts</h3>
+          <span className="muted">{surveyors.length} shown</span>
         </div>
-        {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? "Creating..." : "Create administrator"}</button>
-      </form>}
-      {formType === "surveyor" && <form className="create-form" onSubmit={submitForm}>
-        <div className="form-heading"><div><h3>Create surveyor</h3><p className="muted">Create the surveyor profile used for assignments and field visits.</p></div></div>
-        <div className="form-grid">
-          <label>Employee ID<input required minLength={3} maxLength={50} placeholder="SURV-001" value={surveyorForm.employee_id} onChange={(event) => setSurveyorForm({ ...surveyorForm, employee_id: event.target.value.toUpperCase() })} /></label>
-          <label>Full name<input required maxLength={200} value={surveyorForm.full_name} onChange={(event) => setSurveyorForm({ ...surveyorForm, full_name: event.target.value })} /></label>
-          <label>Phone number<input required type="tel" placeholder="+1234567890" value={surveyorForm.phone_number} onChange={(event) => setSurveyorForm({ ...surveyorForm, phone_number: event.target.value })} /></label>
-          <label>Password<input required minLength={12} type="password" placeholder="12+ characters" value={surveyorForm.password} onChange={(event) => setSurveyorForm({ ...surveyorForm, password: event.target.value })} /></label>
-        </div>
-        {error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? "Creating..." : "Create surveyor"}</button>
-      </form>}
-      {editing?.type === "admin" && <form className="create-form edit-form" onSubmit={saveEdit}>
-        <div className="form-heading"><div><h3>Edit administrator</h3><p className="muted">Update the email or leave the password blank to keep it unchanged.</p></div><button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button></div>
-        <div className="form-grid">
-          <label>Email<input required type="email" value={adminEdit.email} onChange={(event) => setAdminEdit({ ...adminEdit, email: event.target.value })} /></label>
-          <label>New password<input minLength={12} type="password" placeholder="Leave blank to keep current password" value={adminEdit.password} onChange={(event) => setAdminEdit({ ...adminEdit, password: event.target.value })} /></label>
-        </div>
-        {editError && <div className="error">{editError}</div>}
-        <button className="primary" disabled={editBusy}>{editBusy ? "Saving..." : "Save administrator"}</button>
-      </form>}
-      {editing?.type === "surveyor" && <form className="create-form edit-form" onSubmit={saveEdit}>
-        <div className="form-heading"><div><h3>Edit surveyor</h3><p className="muted">Update profile details or set a new password.</p></div><button type="button" className="link-button" onClick={() => setEditing(null)}>Cancel</button></div>
-        <div className="form-grid">
-          <label>Full name<input required maxLength={200} value={surveyorEdit.full_name} onChange={(event) => setSurveyorEdit({ ...surveyorEdit, full_name: event.target.value })} /></label>
-          <label>Phone number<input required type="tel" value={surveyorEdit.phone_number} onChange={(event) => setSurveyorEdit({ ...surveyorEdit, phone_number: event.target.value })} /></label>
-          <label>New password<input minLength={12} type="password" placeholder="Leave blank to keep current password" value={surveyorEdit.password} onChange={(event) => setSurveyorEdit({ ...surveyorEdit, password: event.target.value })} /></label>
-        </div>
-        {editError && <div className="error">{editError}</div>}
-        <button className="primary" disabled={editBusy}>{editBusy ? "Saving..." : "Save surveyor"}</button>
-      </form>}
-      <DataTable title="" headers={["Username", "Email", "Role", "MFA", "Created", "Last login", "Status", "Actions"]} rows={users.map((user) => [
-        user.username,
-        user.email,
-        user.role.replace("_", " "),
-        user.totp_enabled ? "Enabled" : "Not enabled",
-        new Date(user.created_at).toLocaleDateString(),
-        user.last_login ? new Date(user.last_login).toLocaleString() : "Never",
-        user.is_active ? "Active" : "Inactive",
-        canCreateAdmin
-          ? <Actions key={user.id} onEdit={() => beginAdminEdit(user)} onToggle={() => toggleAdmin(user)} active={user.is_active} />
-          : "—"
-      ])} />
-      <div className="subtable-heading"><h3>Surveyor accounts</h3><span className="muted">{surveyors.length} shown</span></div>
-      <DataTable title="" headers={["Employee ID", "Name", "Phone", "Email", "Created", "Status", "Actions"]} rows={surveyors.map((surveyor) => [
-        surveyor.employee_id, surveyor.full_name, surveyor.phone_number ?? "—", surveyor.email ?? "—",
-        new Date(surveyor.created_at).toLocaleDateString(), surveyor.is_active ? "Active" : "Inactive",
-        <Actions key={surveyor.id} onEdit={() => beginSurveyorEdit(surveyor)} onToggle={() => toggleSurveyor(surveyor)} active={surveyor.is_active} />
-      ])} />
-    </section>
-  </div>;
-}
-
-function Overview({ metrics, visits, onNavigate }: { metrics: Metrics | null; visits: Visit[]; onNavigate: (section: Section) => void }) {
-  const counts = metrics?.counts;
-  const [faceStats, setFaceStats] = useState<{
-    summary: {
-      total_surveyors: number;
-      face_registered: number;
-      face_not_registered: number;
-      registration_rate: number;
-    };
-  } | null>(null);
-
-  useEffect(() => {
-    api.faceRegistrationStats().then(setFaceStats).catch(() => {});
-  }, []);
-
-  return <div className="page">
-    <div className="stat-grid">
-      <Stat label="Total visits" value={counts?.visits ?? "—"} accent="green" />
-      <Stat label="Active surveyors" value={counts?.surveyors ?? "—"} accent="blue" />
-      <Stat label="Registered fields" value={counts?.fields ?? "—"} accent="gold" />
-      <Stat label="Registered phones" value={counts?.phones ?? "—"} accent="purple" />
+          <DataTable
+            title=""
+            headers={["Employee ID", "Name", "Phone", "Email", "Created", "Last sync", "Status", "Actions"]}
+            rows={surveyors.map((surveyor) => [
+              surveyor.employee_id,
+              surveyor.full_name,
+              surveyor.phone_number ?? "—",
+              surveyor.email ?? "—",
+              new Date(surveyor.created_at).toLocaleDateString(),
+              surveyor.last_location_sync_at ? new Date(surveyor.last_location_sync_at).toLocaleString() : "Never",
+              surveyor.is_active ? "Active" : "Inactive",
+              <Actions
+                key={surveyor.id}
+                onEdit={() => beginSurveyorEdit(surveyor)}
+                onToggle={() => toggleSurveyor(surveyor)}
+                onTrack={() => setTracking(surveyor)}
+                active={surveyor.is_active}
+              />
+            ])}
+          />
+      </section>
+      {tracking && (
+        <SurveyorActivityPanel
+          surveyorId={tracking.id}
+          surveyorName={tracking.full_name}
+          onClose={() => setTracking(null)}
+        />
+      )}
     </div>
-    <section className="panel"><div className="panel-heading"><div><p className="eyebrow">AUDIT QUEUE</p><h3>Recent field visits</h3></div><button className="link-button" onClick={() => onNavigate("visits")}>View all →</button></div>
-      <DataTable compact title="" headers={["Visit", "Surveyor", "Field", "Captured", "Status"]} rows={visits.slice(0, 5).map((visit) => [<span key={`${visit.id}-id`} title={visit.visit_id}>{shortId(visit.visit_id)}</span>, visit.surveyor_name ?? "—", visit.field_code ?? "—", new Date(visit.satellite_timestamp).toLocaleDateString(), <StatusBadge key={`${visit.id}-badge`} visit={visit} />])} />
-    </section>
-  </div>;
-}
-
-function Stat({ label, value, accent }: { label: string; value: string | number; accent: string }) {
-  return <div className={`stat-card ${accent}`}><span className="stat-icon">◆</span><p>{label}</p><strong>{value}</strong><small>Live from backend</small></div>;
-}
-
-function DataTable({ title, headers, rows, compact = false }: { title: string; headers: string[]; rows: Array<Array<ReactNode>>; compact?: boolean }) {
-  return <section className={compact ? "table-wrap compact" : "panel table-wrap"}>{title && <div className="panel-heading"><h3>{title}</h3><span className="muted">{rows.length} shown</span></div>}<div className="table-scroll"><table><thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.length ? rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cellIndex === row.length - 1 ? cell : cell}</td>)}</tr>) : <tr><td colSpan={headers.length} className="empty">No records found.</td></tr>}</tbody></table></div></section>;
+  );
 }

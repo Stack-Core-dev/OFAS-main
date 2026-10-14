@@ -27,10 +27,13 @@ def list_visits():
     query = db.query(Visit)
     
     if status:
-        try:
-            query = query.filter(Visit.review_status == VisitStatus(status))
-        except ValueError:
-            return jsonify({'error': 'Invalid status'}), 400
+        if status == 'unreviewed':
+            query = query.filter(Visit.review_status.is_(None))
+        else:
+            try:
+                query = query.filter(Visit.review_status == VisitStatus(status))
+            except ValueError:
+                return jsonify({'error': 'Invalid status'}), 400
     
     if surveyor_id:
         query = query.filter(Visit.surveyor_id == surveyor_id)
@@ -151,9 +154,6 @@ def review_visit(visit_id):
     visit = db.query(Visit).filter(Visit.id == visit_id).first()
     if not visit:
         return jsonify({'error': 'Visit not found'}), 404
-    
-    if visit.review_status:
-        return jsonify({'error': 'Visit already reviewed'}), 400
     
     decision = data.get('decision')
     if decision not in ('VALID', 'INVALID', 'FLAGGED'):

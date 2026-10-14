@@ -11,6 +11,11 @@ import android.os.IBinder
 import android.util.Log
 import com.ofas.data.database.OFASDatabase
 import com.ofas.security.keystore.KeyManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class TrailForegroundService : Service() {
 
@@ -34,6 +39,7 @@ class TrailForegroundService : Service() {
     }
 
     private lateinit var trailManager: TrailManager
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super.onCreate()
@@ -49,8 +55,18 @@ class TrailForegroundService : Service() {
         val database = OFASDatabase.getInstance(this)
         val keyManager = KeyManager.getInstance(this)
         trailManager = TrailManager.getInstance(this, database, keyManager)
+        trailManager.onEntryRecorded = {
+            uploadPendingLocations()
+        }
         trailManager.startRecording()
-        Log.d(TAG, "Trail recording started")
+        uploadPendingLocations()
+        Log.i(TAG, "Trail recording started")
+    }
+
+    private fun uploadPendingLocations() {
+        scope.launch {
+            SurveyorLocationUploader.uploadPending(applicationContext)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -60,8 +76,10 @@ class TrailForegroundService : Service() {
     override fun onDestroy() {
         if (::trailManager.isInitialized) {
             trailManager.stopRecording()
+            trailManager.onEntryRecorded = null
         }
-        Log.d(TAG, "Trail recording stopped")
+        scope.cancel()
+        Log.i(TAG, "Trail recording stopped")
         super.onDestroy()
     }
 

@@ -14,11 +14,8 @@ import com.google.gson.reflect.TypeToken
 import com.ofas.data.database.OFASDatabase
 import com.ofas.data.model.VisitEntity
 import com.ofas.data.repository.VisitRepository
-import com.ofas.data.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 class SyncWorker(
@@ -28,7 +25,16 @@ class SyncWorker(
 
     companion object {
         private const val TAG = "SyncWorker"
+
+        // Tag every sync request carries so the UI can observe all of them,
+        // regardless of whether they were triggered periodically or on demand.
         const val WORK_NAME = "periodic_sync"
+
+        // Unique names must differ between the periodic worker and the on-demand
+        // worker: sharing one name would let the one-time request replace (and
+        // cancel) the periodic schedule.
+        private const val PERIODIC_WORK_NAME = "periodic_sync_worker"
+        private const val ONE_TIME_WORK_NAME = "sync_now_worker"
 
         fun schedulePeriodicSync(context: Context) {
             val constraints = Constraints.Builder()
@@ -38,16 +44,19 @@ class SyncWorker(
                 SyncWorker::class.java,
                 1,
                 TimeUnit.HOURS
-            ).setConstraints(constraints).build()
+            )
+                .setConstraints(constraints)
+                .addTag(WORK_NAME)
+                .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                WORK_NAME,
+                PERIODIC_WORK_NAME,
                 ExistingPeriodicWorkPolicy.UPDATE,
                 request
             )
         }
 
         fun cancelPeriodicSync(context: Context) {
-            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+            WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_WORK_NAME)
         }
 
         fun enqueueNow(context: Context) {
@@ -56,10 +65,11 @@ class SyncWorker(
                 .build()
             val request = androidx.work.OneTimeWorkRequest.Builder(SyncWorker::class.java)
                 .setConstraints(constraints)
+                .addTag(WORK_NAME)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
-                WORK_NAME,
-                androidx.work.ExistingWorkPolicy.REPLACE,
+                ONE_TIME_WORK_NAME,
+                androidx.work.ExistingWorkPolicy.KEEP,
                 request
             )
         }
@@ -73,11 +83,7 @@ class SyncWorker(
             ?: return@withContext Result.success()
         val database = OFASDatabase.getInstance(applicationContext)
         val repository = VisitRepository(database.visitDao())
-        val api = Retrofit.Builder()
-            .baseUrl(BuildConfig.OFAS_API_BASE_URL)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(ApiService::class.java)
+        val api = ApiServiceFactory.create()
 
         var retry = false
         for (visit in repository.getPendingSync()) {
@@ -140,6 +146,9 @@ private fun VisitEntity.toRequest(gson: Gson): SubmitVisitRequest {
         bearing = bearing,
         selfiePhotoHash = selfiePhotoHash,
         selfiePhotoS3Key = selfiePhotoS3Key,
+        selfieLatitude = selfieLatitude,
+        selfieLongitude = selfieLongitude,
+        selfieAccuracyMeters = selfieAccuracyMeters,
         fieldPhotos = gson.fromJson(fieldPhotos, photosType) ?: emptyList(),
         faceMatchScore = faceMatchScore,
         livenessVerified = livenessVerified,

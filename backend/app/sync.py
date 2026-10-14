@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 
 from .models import (
-    User, Surveyor, Field, Assignment, Visit, TrailEntry, Phone, PhoneStatus, VisitStatus
+    User, Surveyor, Field, Assignment, Visit, TrailEntry, Phone, PhoneStatus, VisitStatus,
+    SurveyorLocation
 )
 from .database import get_db
 from .auth import require_surveyor, get_current_user_id
@@ -311,3 +312,124 @@ def get_sync_status():
         'synced_today': synced_today,
         'server_time': datetime.utcnow().isoformat() + 'Z'
     })
+
+
+def _parse_ping_timestamp(raw):
+    if not raw:
+        raise ValueError('missing timestamp')
+    if isinstance(raw, (int, float)):
+        return datetime.utcfromtimestamp(float(raw) / 1000.0)
+    return datetime.fromisoformat(str(raw).replace('Z', '+00:00')).replace(tzinfo=None)
+
+
+@sync_bp.route('/location', methods=['POST'])
+@require_surveyor
+def upload_surveyor_location():
+    """Store GNSS pings captured by the surveyor app against the surveyor."""
+    db = get_db()
+    surveyor = _current_surveyor(db)
+    if not surveyor:
+        return jsonify({'error': 'Surveyor profile not found'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    pings = payload.get('pings')
+    if pings is None:
+        if payload.get('latitude') is not None and payload.get('longitude') is not None:
+            pings = [payload]
+        else:
+            pings = []
+    if not isinstance(pings, list):
+        return jsonify({'error': 'pings must be a list'}), 400
+
+    device_id = payload.get('device_id')
+    phone = None
+    if device_id:
+        phone = db.query(Phone).filter(Phone.device_id == device_id).first()
+
+    stored = 0
+    skipped = 0
+    errors = []
+    for index, ping in enumerate(pings):
+        if not isinstance(ping, dict):
+            errors.append(f'ping {index}: not an object')
+            continue
+        try:
+            recorded_at = _parse_ping_timestamp(ping.get('recorded_at') or ping.get('timestamp'))
+            latitude = float(ping['latitude'])
+            longitude = float(ping['longitude'])
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f'ping {index}: {exc}')
+            continue
+
+        exists = db.query(SurveyorLocation).filter(
+            SurveyorLocation.surveyor_id == surveyor.id,
+            SurveyorLocation.recorded_at == recorded_at
+        ).first()
+        if exists:
+            skipped += 1
+            continue
+
+        db.add(SurveyorLocation(
+            surveyor_id=surveyor.id,
+            phone_id=phone.id if phone else None,
+            device_id=device_id,
+            recorded_at=recorded_at,
+            latitude=latitude,
+            longitude=longitude,
+            accuracy_meters=ping.get('accuracy_meters'),
+            altitude=ping.get('altitude'),
+            speed=ping.get('speed'),
+            bearing=ping.get('bearing'),
+            source=ping.get('source') or 'trail'
+        ))
+        stored += 1
+
+    if phone:
+        phone.last_seen = datetime.utcnow()
+
+    if stored or phone:
+        db.commit()
+
+    return jsonify({
+        'success': True,
+        'received': len(pings),
+        'stored': stored,
+        'skipped': skipped,
+        'errors': errors
+    }), 200
+
+
+@sync_bp.route('/location', methods=['GET'])
+@require_surveyor
+def get_surveyor_location():
+    """Return the most recent stored location pings for the authenticated surveyor."""
+    db = get_db()
+    surveyor = _current_surveyor(db)
+    if not surveyor:
+        return jsonify({'error': 'Surveyor profile not found'}), 404
+
+    try:
+        limit = min(int(request.args.get('limit', 100)), 1000)
+    except (TypeError, ValueError):
+        limit = 100
+
+    rows = db.query(SurveyorLocation).filter(
+        SurveyorLocation.surveyor_id == surveyor.id
+    ).order_by(SurveyorLocation.recorded_at.desc()).limit(limit).all()
+
+    return jsonify({
+        'surveyor_id': str(surveyor.id),
+        'count': len(rows),
+        'locations': [{
+            'id': str(row.id),
+            'recorded_at': row.recorded_at.isoformat() + 'Z',
+            'latitude': row.latitude,
+            'longitude': row.longitude,
+            'accuracy_meters': row.accuracy_meters,
+            'altitude': row.altitude,
+            'speed': row.speed,
+            'bearing': row.bearing,
+            'source': row.source,
+            'device_id': row.device_id
+        } for row in rows]
+    }), 200

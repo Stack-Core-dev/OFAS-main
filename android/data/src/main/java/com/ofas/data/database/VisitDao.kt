@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.ofas.data.model.VisitEntity
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface VisitDao {
@@ -40,6 +41,9 @@ interface VisitDao {
     @Query("SELECT COUNT(*) FROM visits WHERE syncedAt IS NULL AND status IN ('QUEUED', 'SYNCING', 'FAILED')")
     suspend fun getPendingSyncCount(): Int
 
+    @Query("SELECT COUNT(*) FROM visits WHERE syncedAt IS NULL AND status IN ('QUEUED', 'SYNCING', 'FAILED')")
+    fun observePendingSyncCount(): Flow<Int>
+
     @Query("UPDATE visits SET status = 'SYNCING', updatedAt = :updatedAt WHERE id = :id AND status IN ('QUEUED', 'FAILED')")
     suspend fun markSyncing(id: String, updatedAt: Long): Int
 
@@ -54,6 +58,9 @@ interface VisitDao {
 
     @Query("SELECT COUNT(*) FROM visits WHERE surveyorId = :surveyorId")
     suspend fun countBySurveyor(surveyorId: String): Int
+
+    @Query("SELECT COUNT(*) FROM visits WHERE surveyorId = :surveyorId AND date(satelliteTimestamp/1000, 'unixepoch') = date('now')")
+    suspend fun countToday(surveyorId: String): Int
 
     @Query("SELECT COUNT(*) FROM visits WHERE status = 'SYNCED' AND date(syncedAt/1000, 'unixepoch') = date('now') AND surveyorId = :surveyorId")
     suspend fun countSyncedToday(surveyorId: String): Int

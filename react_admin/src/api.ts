@@ -36,6 +36,7 @@ export type Visit = {
   visit_id: string;
   surveyor_id: string;
   surveyor_name: string | null;
+  field_id?: string | null;
   field_code: string | null;
   satellite_timestamp: string;
   latitude: number;
@@ -54,6 +55,7 @@ export type Visit = {
   face_match_score?: number | null;
   liveness_verified?: boolean;
   synced_at?: string | null;
+  reviewed_by?: string | null;
   reviewed_at?: string | null;
   review_notes?: string | null;
 };
@@ -95,6 +97,7 @@ export type Surveyor = {
   face_registration_status?: "registered" | "not_registered";
   face_template_version?: number;
   face_template_updated_at?: string | null;
+  last_location_sync_at?: string | null;
 };
 
 export type Field = {
@@ -130,6 +133,57 @@ export type Assignment = {
   end_date: string;
   is_completed: boolean;
   completed_at: string | null;
+};
+
+export type Pagination = {
+  page: number;
+  per_page: number;
+  total: number;
+};
+
+export type SurveyorLocationPing = {
+  id: string;
+  recorded_at: string;
+  latitude: number;
+  longitude: number;
+  accuracy_meters: number | null;
+  altitude: number | null;
+  speed: number | null;
+  bearing: number | null;
+  source: string;
+  device_id: string | null;
+};
+
+export type SurveyorActivity = {
+  surveyor: { id: string; employee_id: string; full_name: string };
+  count: number;
+  last_sync_at: string | null;
+  latest: {
+    recorded_at: string;
+    latitude: number;
+    longitude: number;
+    accuracy_meters: number | null;
+    source: string;
+  } | null;
+  locations: SurveyorLocationPing[];
+};
+
+export type ReviewStats = {
+  total_visits: number;
+  pending_review: number;
+  by_review_status: Record<string, number>;
+  by_field: Record<string, number>;
+  by_surveyor: Record<string, number>;
+};
+
+export type VisitListQuery = {
+  page?: number;
+  per_page?: number;
+  status?: string;
+  surveyor_id?: string;
+  field_id?: string;
+  date_from?: string;
+  date_to?: string;
 };
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
@@ -216,12 +270,19 @@ export const api = {
     registered: Array<{ id: string; employee_id: string; full_name: string; face_template_version: number; updated_at: string }>;
     not_registered: Array<{ id: string; employee_id: string; full_name: string }>;
   }>("/api/admin/surveyors/face-registration-stats"),
-  visits: (params: { per_page?: number; status?: string; surveyor_id?: string } = {}) => {
-    const query = new URLSearchParams({ per_page: String(params.per_page ?? 100) });
+  visits: (params: VisitListQuery = {}) => {
+    const query = new URLSearchParams({
+      page: String(params.page ?? 1),
+      per_page: String(params.per_page ?? 20)
+    });
     if (params.status) query.set("status", params.status);
     if (params.surveyor_id) query.set("surveyor_id", params.surveyor_id);
-    return request<{ visits: Visit[]; pagination: { total: number } }>(`/api/review/visits?${query.toString()}`);
+    if (params.field_id) query.set("field_id", params.field_id);
+    if (params.date_from) query.set("date_from", params.date_from);
+    if (params.date_to) query.set("date_to", params.date_to);
+    return request<{ visits: Visit[]; pagination: Pagination }>(`/api/review/visits?${query.toString()}`);
   },
+  reviewStats: () => request<ReviewStats>("/api/review/stats"),
   visitDetail: (id: string) => request<VisitDetail>(`/api/review/visits/${id}`),
   reviewVisit: (id: string, decision: "VALID" | "INVALID" | "FLAGGED", notes = "") =>
     request<{ message: string; review_status: string; reviewed_at: string }>(`/api/review/visits/${id}/review`, {
@@ -229,6 +290,8 @@ export const api = {
       body: JSON.stringify({ decision, notes })
     }),
   surveyors: () => request<{ surveyors: Surveyor[] }>("/api/admin/surveyors?per_page=100&active=false"),
+  surveyorLocations: (id: string, limit = 200) =>
+    request<SurveyorActivity>(`/api/admin/surveyors/${id}/locations?limit=${limit}`),
   fields: () => request<{ fields: Field[] }>("/api/admin/fields?per_page=100"),
   assignments: () => request<{ assignments: Assignment[] }>("/api/admin/assignments?per_page=200"),
   users: () => request<{ users: ManagedUser[] }>("/api/admin/users?per_page=100"),

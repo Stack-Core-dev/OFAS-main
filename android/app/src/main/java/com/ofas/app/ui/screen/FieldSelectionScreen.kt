@@ -1,5 +1,9 @@
 package com.ofas.app.ui.screen
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,12 +33,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ofas.app.viewmodel.FieldSelectionViewModel
@@ -47,6 +56,15 @@ fun FieldSelectionScreen(
 ) {
     val fields by viewModel.fields.collectAsStateWithLifecycle()
     val surveyorId by viewModel.surveyorId.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var pendingSelection by remember { mutableStateOf<Pair<FieldEntity, String>?>(null) }
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        pendingSelection?.let { (field, sid) -> onFieldSelected(field, sid) }
+        pendingSelection = null
+    }
 
     LaunchedEffect(Unit) {
         viewModel.refresh()
@@ -70,7 +88,25 @@ fun FieldSelectionScreen(
         ) {
             items(fields, key = { it.id }) { field ->
                 FieldCard(field) {
-                    surveyorId?.let { onFieldSelected(field, it) }
+                    val sid = surveyorId ?: return@FieldCard
+                    val hasLocation = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (hasLocation) {
+                        onFieldSelected(field, sid)
+                    } else {
+                        pendingSelection = field to sid
+                        locationPermissionLauncher.launch(
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            )
+                        )
+                    }
                 }
             }
         }

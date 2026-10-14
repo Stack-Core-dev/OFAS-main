@@ -2,6 +2,7 @@ package com.ofas.data.repository
 
 import com.ofas.data.database.VisitDao
 import com.ofas.data.model.VisitEntity
+import kotlinx.coroutines.flow.Flow
 
 class VisitRepository(private val dao: VisitDao) {
 
@@ -25,6 +26,8 @@ class VisitRepository(private val dao: VisitDao) {
 
     suspend fun getPendingSyncCount(): Int = dao.getPendingSyncCount()
 
+    fun observePendingSyncCount(): Flow<Int> = dao.observePendingSyncCount()
+
     suspend fun markSyncing(id: String): Int = dao.markSyncing(id, System.currentTimeMillis())
     suspend fun markSynced(id: String, timestamp: Long): Int =
         dao.markSynced(id, timestamp, System.currentTimeMillis())
@@ -33,6 +36,8 @@ class VisitRepository(private val dao: VisitDao) {
     suspend fun getPaged(limit: Int, offset: Int): List<VisitEntity> = dao.getPaged(limit, offset)
 
     suspend fun countBySurveyor(surveyorId: String): Int = dao.countBySurveyor(surveyorId)
+
+    suspend fun countToday(surveyorId: String): Int = dao.countToday(surveyorId)
 
     suspend fun countSyncedToday(surveyorId: String): Int = dao.countSyncedToday(surveyorId)
 }

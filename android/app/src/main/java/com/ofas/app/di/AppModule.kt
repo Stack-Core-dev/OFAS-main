@@ -7,6 +7,7 @@ import com.ofas.data.repository.FaceTemplateRepository
 import com.ofas.data.repository.SurveyorRepository
 import com.ofas.data.repository.VisitRepository
 import com.ofas.data.sync.ApiService
+import com.ofas.data.sync.ApiServiceFactory
 import com.ofas.security.keystore.KeyManager
 import com.ofas.data.trail.TrailManager
 import com.ofas.app.repository.AuthRepository
@@ -17,16 +18,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
-import retrofit2.Retrofit
-import retrofit2.converter.moshi.MoshiConverterFactory
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
-
-    private const val BASE_URL = "http://10.10.4.133:5000/"
 
     @Provides
     @Singleton
@@ -61,15 +56,7 @@ object AppModule {
     @Provides
     @Singleton
     fun provideApiService(): ApiService {
-        val moshi = Moshi.Builder()
-            .add(KotlinJsonAdapterFactory())
-            .build()
-
-        return Retrofit.Builder()
-            .baseUrl(BASE_URL)
-            .addConverterFactory(MoshiConverterFactory.create(moshi))
-            .build()
-            .create(ApiService::class.java)
+        return ApiServiceFactory.create()
     }
 
     @Provides
